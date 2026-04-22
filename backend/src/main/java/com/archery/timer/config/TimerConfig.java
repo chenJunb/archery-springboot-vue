@@ -5,10 +5,12 @@ import com.archery.timer.service.LogFileManager;
 import com.archery.timer.service.MatchTypeConfigService;
 import com.archery.timer.service.TimerEngine;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+@Slf4j
 @Configuration
 @RequiredArgsConstructor
 public class TimerConfig {
@@ -44,11 +46,11 @@ public class TimerConfig {
 
             // 记录调试信息
             if (state.getStatus() != null && state.getStatus().equals("running")) {
-                System.out.println("广播计时器状态: " + state.getStatus() +
-                    ", 剩余时间: " + state.getTotalRemaining() + "秒");
+                log.debug("广播计时器状态: {}, 剩余时间: {}秒",
+                    state.getStatus(), state.getTotalRemaining());
             }
         } catch (Exception e) {
-            System.err.println("广播计时器状态失败: " + e.getMessage());
+            log.error("广播计时器状态失败: {}", e.getMessage(), e);
         }
     }
 }

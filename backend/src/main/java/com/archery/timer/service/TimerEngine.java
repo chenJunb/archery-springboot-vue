@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PreDestroy;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -742,9 +743,23 @@ public class TimerEngine {
         notifyStateChange();
     }
 
+    @PreDestroy
     public void shutdown() {
-        if (timerScheduler != null) {
-            timerScheduler.shutdown();
+        if (timerScheduler != null && !timerScheduler.isShutdown()) {
+            try {
+                // 停止接收新任务
+                timerScheduler.shutdown();
+                // 等待已有任务完成，最多等待2秒
+                if (!timerScheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                    log.warn("计时器任务在规定时间内未完成，执行强制关闭");
+                    timerScheduler.shutdownNow();
+                }
+                log.info("计时引擎已关闭");
+            } catch (InterruptedException e) {
+                log.error("等待计时器任务完成时被中断", e);
+                timerScheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
     }
 }
