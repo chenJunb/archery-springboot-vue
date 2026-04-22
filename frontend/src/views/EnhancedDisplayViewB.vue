@@ -148,7 +148,7 @@ onMounted(() => {
 // 状态
 const isFullScreen = ref(false)
 const showAlternateInfo = ref(false)
-const previousStageColor = ref(null)
+const previousLightColor = ref(null)
 const lastBuzzedPhase = ref(null)
 
 // 计算属性
@@ -271,19 +271,15 @@ const playSound = () => {
 
   const stageName = timerState.currentStageName || ''
   const currentPhase = stageName.includes('准备') ? 'prepare' :
-                       stageName.includes('黄灯') ? 'yellow' :
                        stageName.includes('比赛') || stageName.includes('射击') ? 'competition' : null
 
-  // 避免重复鸣笛同一阶段
+  // 避免重复鸣笛同一阶段 - 仅1声和2声使用阶段名称
   if (currentPhase && currentPhase !== lastBuzzedPhase.value) {
     lastBuzzedPhase.value = currentPhase
 
     if (stageName.includes('准备')) {
       logService.event('STAGE_TRANSITION', { stage: '准备', action: '发出1声鸣笛' })
       buzzer.buzz1()
-    } else if (stageName.includes('黄灯')) {
-      logService.event('STAGE_TRANSITION', { stage: '黄灯', action: '发出3声鸣笛' })
-      buzzer.buzz3()
     } else if (stageName.includes('比赛') || stageName.includes('射击')) {
       logService.event('STAGE_TRANSITION', { stage: '比赛', action: '发出2声鸣笛' })
       buzzer.buzz2()
@@ -291,9 +287,30 @@ const playSound = () => {
   }
 }
 
+// 监听灯色变化以触发3声鸣笛（GREEN→YELLOW）
+const checkLightColorTransition = () => {
+  if (!timerState.soundEnabled) return
+
+  const currentColor = currentLightColor.value
+
+  // 检测GREEN→YELLOW转换
+  if (previousLightColor.value === '#00FF00' && currentColor === '#FFFF00') {
+    logService.event('LIGHT_TRANSITION', { from: 'GREEN', to: 'YELLOW', action: '发出3声鸣笛' })
+    buzzer.buzz3()
+  }
+
+  previousLightColor.value = currentColor
+}
+
 // 观察阶段变化以自动播放声音
+import { watch } from 'vue'
 watch(() => timerState.currentStageName, () => {
   playSound()
+})
+
+// 监听灯色变化
+watch(() => currentLightColor.value, () => {
+  checkLightColorTransition()
 })
 
 // 生命周期
@@ -344,9 +361,6 @@ const handleKeyDown = (event) => {
 import { watch } from 'vue'
 watch(() => timerState.currentStageName, (newStage, oldStage) => {
   if (newStage && newStage !== oldStage) {
-    // 阶段变化时播放声音
-    playSound()
-
     // 显示阶段变化提示
     if (isActiveScreen.value) {
       console.log(`阶段变化: ${oldStage} -> ${newStage}`)
