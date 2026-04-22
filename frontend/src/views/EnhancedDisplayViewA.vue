@@ -128,7 +128,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useEnhancedTimerStore } from '../stores/enhancedTimer'
 import { useBuzzer } from '../composables/useBuzzer'
@@ -303,7 +303,6 @@ const checkLightColorTransition = () => {
 }
 
 // 观察阶段变化以自动播放声音
-import { watch } from 'vue'
 watch(() => timerState.currentStageName, () => {
   playSound()
 })

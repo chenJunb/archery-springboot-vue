@@ -358,7 +358,6 @@ const handleKeyDown = (event) => {
 }
 
 // 监听状态变化
-import { watch } from 'vue'
 watch(() => timerState.currentStageName, (newStage, oldStage) => {
   if (newStage && newStage !== oldStage) {
     // 显示阶段变化提示

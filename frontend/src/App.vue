@@ -14,11 +14,9 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { useTimerStore } from './stores/timer'
 import { initGlobalWebSocket, globalConnectionState } from './services/globalWebSocketService'
 
 const route = useRoute()
-const timerStore = useTimerStore()
 
 // 在根组件挂载时初始化全局 WebSocket 连接（仅一次）
 onMounted(() => {
