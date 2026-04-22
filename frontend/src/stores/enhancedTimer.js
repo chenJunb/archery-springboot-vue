@@ -10,8 +10,10 @@ import {
   registerGlobalClient,
   getClientTypeFromRoute,
   sendGlobalWebSocketMessage,
-  subscribeToTopic
+  subscribeToTopic,
+  disconnectGlobalWebSocket
 } from '../services/globalWebSocketService'
+import { logService } from '../services/logService'
 
 // 计时器状态（增强版）
 const timerState = reactive({
@@ -85,26 +87,26 @@ function initMessageListeners() {
   const unsubscribe = onGlobalWebSocketMessage((type, data) => {
     switch (type) {
       case 'connected':
-        console.log('✅ 全局WebSocket已连接，准备注册客户端...')
+        logService.debug('✅ 全局WebSocket已连接，准备注册客户端...')
         // 自动注册客户端
         const clientType = getClientTypeFromRoute()
         registerGlobalClient(clientType)
         break
 
       case 'disconnected':
-        console.log('❌ 全局WebSocket已断开')
+        logService.debug('❌ 全局WebSocket已断开')
         break
 
       case 'registered':
-        console.log('✅ 客户端注册成功:', data)
+        logService.debug('✅ 客户端注册成功:', data)
         break
 
       case 'connection_ready':
-        console.log('🔗 WebSocket连接就绪')
+        logService.debug('🔗 WebSocket连接就绪')
         break
 
       case 'timer_state':
-        console.log('📥 收到计时器状态更新')
+        logService.debug('📥 收到计时器状态更新')
         // 合并状态更新，保留已有的值
         Object.assign(timerState, data)
         break
@@ -117,16 +119,16 @@ function initMessageListeners() {
 
       case 'screenModeConfig':
         if (data.success && data.data) {
-          console.log('📋 收到AB屏模式配置:', data.data)
+          logService.debug('📋 收到AB屏模式配置:', data.data)
         }
         break
 
       case 'matchTypeDetails':
-        console.log('📋 收到比赛类型详细信息:', data)
+        logService.debug('📋 收到比赛类型详细信息:', data)
         break
 
       case 'error':
-        console.error('❌ 收到错误消息:', data)
+        logService.error('❌ 收到错误消息:', data)
         break
     }
   })
@@ -136,8 +138,8 @@ function initMessageListeners() {
 
 // 导出方法
 export function useEnhancedTimerStore() {
-  console.log('🚀 使用 EnhancedTimerStore，初始化消息监听...')
-  console.log('📍 页面URL:', window.location.href)
+  logService.debug('🚀 使用 EnhancedTimerStore，初始化消息监听...')
+  logService.debug('📍 页面URL:', window.location.href)
 
   // 初始化消息监听（每个页面使用 store 时初始化一次）
   initMessageListeners()
@@ -149,16 +151,16 @@ export function useEnhancedTimerStore() {
     connectionCheckCount++
 
     if (globalConnectionState.isConnected && globalConnectionState.clientId) {
-      console.log('✅ WebSocket连接已建立:', {
+      logService.debug('✅ WebSocket连接已建立:', {
         clientId: globalConnectionState.clientId,
         clientType: globalConnectionState.clientType
       })
       clearInterval(checkConnectionInterval)
     } else if (connectionCheckCount >= maxCheckCount) {
-      console.warn('⚠️ WebSocket连接仍未建立，请检查服务器连接')
+      logService.warn('⚠️ WebSocket连接仍未建立，请检查服务器连接')
       clearInterval(checkConnectionInterval)
     } else {
-      console.log('⏳ 等待WebSocket连接建立...', {
+      logService.debug('⏳ 等待WebSocket连接建立...', {
         isConnected: globalConnectionState.isConnected,
         clientId: globalConnectionState.clientId,
         checkCount: connectionCheckCount
@@ -224,10 +226,10 @@ export function useEnhancedTimerStore() {
 
   // 自动连接（全局连接已在 App.vue 中初始化）
   const autoConnect = () => {
-    console.log('🔄 自动连接 - 注册客户端类型')
+    logService.debug('🔄 自动连接 - 注册客户端类型')
     const clientType = getClientTypeFromRoute()
     globalConnectionState.clientType = clientType
-    console.log('📝 客户端类型设置为:', clientType)
+    logService.debug('📝 客户端类型设置为:', clientType)
     registerGlobalClient(clientType)
   }
 
@@ -243,7 +245,7 @@ export function useEnhancedTimerStore() {
         }
       }
     } catch (error) {
-      console.error('获取增强版比赛类型失败:', error)
+      logService.error('获取增强版比赛类型失败:', error)
     }
     return []
   }
@@ -334,17 +336,17 @@ export function useEnhancedTimerStore() {
 
     // 订阅AB屏模式配置
     subscribeToTopic('/topic/match-type-screen-mode', (data) => {
-      console.log('📋 收到AB屏模式配置:', data)
+      logService.debug('📋 收到AB屏模式配置:', data)
     })
 
     // 订阅比赛类型详细信息
     subscribeToTopic('/topic/match-type-details', (data) => {
-      console.log('📋 收到比赛类型详细信息:', data)
+      logService.debug('📋 收到比赛类型详细信息:', data)
     })
 
     // 订阅鸣笛
     subscribeToTopic('/topic/buzzer', (data) => {
-      console.log('📢 收到鸣笛通知:', data)
+      logService.debug('📢 收到鸣笛通知:', data)
       // 这里可以播放鸣笛声音
     })
   }

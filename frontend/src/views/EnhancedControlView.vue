@@ -792,12 +792,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  timerStore.disconnect()
+  // 清理事件监听器和定时器
+  document.removeEventListener('keydown', handleKeyDown)
 })
 
 const subscribeToTopics = () => {
   // 这里可以添加更多主题订阅
-  console.log('订阅WebSocket主题...')
+  logService.debug('订阅WebSocket主题...')
 }
 </script>
 

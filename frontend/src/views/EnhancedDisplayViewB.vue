@@ -361,25 +361,25 @@ watch(() => timerState.currentStageName, (newStage, oldStage) => {
   if (newStage && newStage !== oldStage) {
     // 显示阶段变化提示
     if (isActiveScreen.value) {
-      console.log(`阶段变化: ${oldStage} -> ${newStage}`)
+      logService.debug(`阶段变化: ${oldStage} -> ${newStage}`)
     }
   }
 })
 
 watch(() => timerState.screenBStatus, (newStatus, oldStatus) => {
   if (newStatus && newStatus !== oldStatus) {
-    console.log(`B屏状态变化: ${oldStatus} -> ${newStatus}`)
+    logService.debug(`B屏状态变化: ${oldStatus} -> ${newStatus}`)
   }
 })
 
 watch(() => timerState.status, (newStatus, oldStatus) => {
   if (newStatus && newStatus !== oldStatus) {
-    console.log(`计时器状态变化: ${oldStatus} -> ${newStatus}`)
+    logService.debug(`计时器状态变化: ${oldStatus} -> ${newStatus}`)
 
     // 计时结束提示
     if (newStatus === 'finished') {
       if (isActiveScreen.value) {
-        console.log('计时结束！')
+        logService.info('计时结束！')
       }
     }
   }

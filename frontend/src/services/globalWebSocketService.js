@@ -133,9 +133,9 @@ function startHeartbeat() {
           destination: '/app/heartbeat',
           body: JSON.stringify({ timestamp: Date.now() })
         })
-        console.log('💓 发送心跳')
+        logService.debug('发送心跳')
       } catch (error) {
-        console.error('发送心跳失败:', error)
+        logService.error('发送心跳失败:', error.message)
       }
     }
   }, 10000) // 10秒发送一次
@@ -217,7 +217,7 @@ export function initGlobalWebSocket() {
  */
 export function disconnectGlobalWebSocket() {
   if (globalStompClient) {
-    console.log('断开 WebSocket 连接...')
+    logService.info('断开 WebSocket 连接...')
     stopHeartbeat()
     globalStompClient.deactivate()
     globalStompClient = null

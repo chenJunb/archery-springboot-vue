@@ -15,12 +15,13 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { initGlobalWebSocket, globalConnectionState } from './services/globalWebSocketService'
+import { logService } from './services/logService'
 
 const route = useRoute()
 
 // 在根组件挂载时初始化全局 WebSocket 连接（仅一次）
 onMounted(() => {
-  console.log('🌍 App 根组件挂载，初始化全局 WebSocket 连接...')
+  logService.info('App 根组件挂载，初始化全局 WebSocket 连接...')
   initGlobalWebSocket()
 })
 
