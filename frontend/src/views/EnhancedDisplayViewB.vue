@@ -303,7 +303,6 @@ const checkLightColorTransition = () => {
 }
 
 // 观察阶段变化以自动播放声音
-import { watch } from 'vue'
 watch(() => timerState.currentStageName, () => {
   playSound()
 })
