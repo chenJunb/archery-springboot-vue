@@ -1,0 +1,41 @@
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build outputs
+target/
+dist/
+build/
+node_modules/
+
+# Dependencies
+package-lock.json
+pom.xml.tag
+pom.xml.releaseBackup
+release.properties
+dependency-reduced-pom.xml
+
+# Logs
+*.log
+logs/
+backend/logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# OS
+Thumbs.db
+.env
+.env.local
+
+# Application specific
+frontend/.nuxt
+frontend/out
+*.jar
+*.class

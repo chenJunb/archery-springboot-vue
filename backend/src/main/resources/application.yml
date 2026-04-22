@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: archery-timer
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+
+logging:
+  level:
+    com.archery.timer: INFO
+  file:
+    name: logs/archery-timer.log
+    max-size: 10MB
+    max-history: 7
+  logback:
+    rollingpolicy:
+      max-file-size: 10MB
+      max-history: 7
+
+# 自定义日志配置（通过 @Value 注入）
+custom:
+  logging:
+    directory: logs
+    max-files: 15
+
+# WebSocket配置
+archery:
+  timer:
+    # 允许的WebSocket来源（本地开发和生产环境）
+    websocket:
+      allowed-origins: "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
+    # WebSocket超时时间（24小时）
+    websocket-timeout: 86400000
+    # 控制端心跳超时时间（30秒）
+    control-heartbeat-timeout: 30000
