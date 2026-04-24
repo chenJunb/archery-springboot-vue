@@ -632,6 +632,11 @@ const loadMatchTypeConfig = (matchType) => {
   competitionTime.value = matchType.competitionTime || 180
   yellowLightTime.value = matchType.yellowLightTime || 30
 
+  // ✅ 修复：初始化AB屏的剩余时间为总比赛时间
+  const totalTime = (matchType.preparationTime || 10) + (matchType.competitionTime || 180)
+  timerState.screenARemaining = totalTime
+  timerState.screenBRemaining = totalTime
+
   // 设置AB屏模式
   screenMode.value = matchType.defaultScreenMode || 'alternate'
 
