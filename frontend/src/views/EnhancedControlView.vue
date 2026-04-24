@@ -1513,15 +1513,4 @@ const subscribeToTopics = () => {
     max-height: 340px;
   }
 }
-
-  .status-light {
-    width: 70px;
-    height: 70px;
-  }
-
-  .light-glow {
-    width: 50px;
-    height: 50px;
-  }
-}
 </style>
