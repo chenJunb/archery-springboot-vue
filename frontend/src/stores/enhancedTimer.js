@@ -410,6 +410,27 @@ export function useEnhancedTimerStore() {
     sendGlobalWebSocketMessage('timer/manual-buzzer', { type })
   }
 
+  // 同步时间配置到预览（内部方法，用于立即更新预览显示）
+  const syncTimeConfigToPreview = (prep, comp, yellow) => {
+    // 直接更新内部状态中的时间配置字段（不经过readonly）
+    timerState.preparationTime = prep || 10
+    timerState.competitionTime = comp || 180
+    timerState.yellowLightTime = yellow || 30
+
+    // 更新currentStageRemaining为新的初始配置值
+    // 预览在非运行状态下显示的就是 currentStageRemaining
+    const totalSeconds = (prep || 10) + (comp || 180)
+    timerState.currentStageRemaining = totalSeconds
+    timerState.localDisplayRemaining = totalSeconds
+
+    logService.debug('预览时间配置已同步', {
+      preparation: timerState.preparationTime,
+      competition: timerState.competitionTime,
+      yellowLight: timerState.yellowLightTime,
+      currentStageRemaining: timerState.currentStageRemaining
+    })
+  }
+
   // 订阅相关主题
   const subscribeToTopics = () => {
     // ✅ 修复：清理之前的订阅
@@ -554,6 +575,7 @@ export function useEnhancedTimerStore() {
     // 显示相关方法
     getDisplayRemaining,
     getCurrentScreenRemainingWithLocalCountdown,
+    syncTimeConfigToPreview,
     cleanup
   }
 }

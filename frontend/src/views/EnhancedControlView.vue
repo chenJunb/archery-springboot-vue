@@ -57,6 +57,7 @@
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
+                @blur="onTimeConfigBlur"
               />
               <span class="time-unit">秒</span>
             </div>
@@ -71,6 +72,7 @@
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
+                @blur="onTimeConfigBlur"
               />
               <span class="time-unit">秒</span>
             </div>
@@ -85,6 +87,7 @@
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
+                @blur="onTimeConfigBlur"
               />
               <span class="time-unit">秒</span>
             </div>
@@ -717,6 +720,33 @@ const updateTimeConfig = () => {
 
   // 重置AB屏和控制按钮到初始状态
   resetABScreenState()
+}
+
+const onTimeConfigBlur = () => {
+  // ✅ 失焦时同步预览显示
+  // 确保输入框失焦后立即更新预览界面的倒计时显示
+  if (!timerStore.connectionState.isConnected) {
+    logService.warn('未连接到服务器，无法同步时间配置')
+    return
+  }
+
+  // 立即同步到预览（本地状态，无需等待服务器响应）
+  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
+
+  const config = {
+    preparation: preparationTime.value,
+    competition: competitionTime.value,
+    yellowLight: yellowLightTime.value
+  }
+
+  // 通过WebSocket发送时间配置更新到服务器
+  timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
+
+  logService.debug('时间配置已失焦，预览已同步', {
+    preparation: preparationTime.value,
+    competition: competitionTime.value,
+    yellowLight: yellowLightTime.value
+  })
 }
 
 const updatePrompt = (screen, prompt) => {
