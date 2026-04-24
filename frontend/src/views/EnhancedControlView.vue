@@ -530,8 +530,11 @@ const soundEnabled = ref(true)
 
 // 计算属性
 const totalTime = computed(() => {
+  // ✅ 修复：使用 ?? 而非 || 来正确处理值为0的情况
   // 总时间 = 准备时间 + 比赛时间，黄灯时间不纳入总时间
-  return (preparationTime.value || 0) + (competitionTime.value || 0)
+  const prep = preparationTime.value ?? 0
+  const comp = competitionTime.value ?? 0
+  return prep + comp
 })
 
 const currentLightColor = computed(() => {
@@ -660,11 +663,33 @@ const handleMatchTypeChange = (matchTypeId) => {
 }
 
 const handleScreenModeChange = (mode) => {
-  if (timerStore.connectionState.isConnected) {
-    timerStore.setABMode(mode)
+  // ✅ 修复：验证模式值在允许的列表中
+  const allowedModes = ['sync', 'alternate', 'only_a', 'only_b']
 
-    // 重置AB屏和控制按钮到初始状态
-    resetABScreenState()
+  if (!allowedModes.includes(mode)) {
+    logService.warn('⚠️ 无效的屏幕模式: ' + mode)
+    ElMessage.error('无效的屏幕模式，请使用有效值')
+    // 恢复为之前的有效值
+    screenMode.value = timerState.abMode || 'alternate'
+    return
+  }
+
+  if (timerStore.connectionState.isConnected) {
+    try {
+      timerStore.setABMode(mode)
+      logService.event('SCREEN_MODE_CHANGED', { mode })
+
+      // 重置AB屏和控制按钮到初始状态
+      resetABScreenState()
+    } catch (error) {
+      logService.error('设置屏幕模式失败', { error: error.message })
+      ElMessage.error('设置屏幕模式失败，请重试')
+      // 恢复为之前的值
+      screenMode.value = timerState.abMode || 'alternate'
+    }
+  } else {
+    ElMessage.warning('未连接到服务器，无法更改屏幕模式')
+    screenMode.value = timerState.abMode || 'alternate'
   }
 }
 
