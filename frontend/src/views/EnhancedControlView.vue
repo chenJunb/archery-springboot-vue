@@ -635,6 +635,9 @@ const loadMatchTypeConfig = (matchType) => {
   competitionTime.value = matchType.competitionTime || 180
   yellowLightTime.value = matchType.yellowLightTime || 30
 
+  // ✅ 立即同步到预览，确保初始化时显示正确的倒计时
+  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
+
   // 设置AB屏模式
   screenMode.value = matchType.defaultScreenMode || 'alternate'
 
