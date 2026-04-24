@@ -1,42 +1,55 @@
 /**
  * 射箭比赛计时系统 - 鸣笛/声音播放 composable
+ * ✅ 修复：使用单例模式防止内存泄漏
  */
 
 import { ref } from 'vue'
 import { Howl } from 'howler'
 import { logService } from '@/services/logService'
 
+// ✅ 修复：全局单例 - 所有组件共享同一份音频对象
+let globalSounds = null
+
+// ✅ 修复：获取或创建全局音频对象
+function getGlobalSounds() {
+    if (globalSounds === null) {
+        logService.debug('首次创建全局音频对象（单例）')
+        globalSounds = {
+            beep1: new Howl({
+                src: ['/sounds/1-beep.mp3', '/sounds/1-beep.wav'],
+                volume: 0.5,
+                onload: () => logService.debug('1-beep 音频加载完成'),
+                onerror: (id, error) => logService.error('1-beep 音频加载失败', { error: error.toString() })
+            }),
+            beep2: new Howl({
+                src: ['/sounds/2-beep.mp3', '/sounds/2-beep.wav'],
+                volume: 0.5,
+                onload: () => logService.debug('2-beep 音频加载完成'),
+                onerror: (id, error) => logService.error('2-beep 音频加载失败', { error: error.toString() })
+            }),
+            beep3: new Howl({
+                src: ['/sounds/3-beep.mp3', '/sounds/3-beep.wav'],
+                volume: 0.5,
+                onload: () => logService.debug('3-beep 音频加载完成'),
+                onerror: (id, error) => logService.error('3-beep 音频加载失败', { error: error.toString() })
+            }),
+            countdown: new Howl({
+                src: ['/sounds/countdown_audio.mp3', '/sounds/countdown_audio.wav'],
+                volume: 0.7,
+                onload: () => logService.debug('countdown 音频加载完成'),
+                onerror: (id, error) => logService.error('countdown 音频加载失败', { error: error.toString() })
+            })
+        }
+    }
+    return globalSounds
+}
+
 export function useBuzzer() {
     const isMuted = ref(false)
     const volume = ref(1.0)
 
-    // 预加载音频对象
-    const sounds = {
-        beep1: new Howl({
-            src: ['/sounds/1-beep.mp3', '/sounds/1-beep.wav'],
-            volume: 0.5,
-            onload: () => logService.debug('1-beep 音频加载完成'),
-            onerror: (id, error) => logService.error('1-beep 音频加载失败', { error: error.toString() })
-        }),
-        beep2: new Howl({
-            src: ['/sounds/2-beep.mp3', '/sounds/2-beep.wav'],
-            volume: 0.5,
-            onload: () => logService.debug('2-beep 音频加载完成'),
-            onerror: (id, error) => logService.error('2-beep 音频加载失败', { error: error.toString() })
-        }),
-        beep3: new Howl({
-            src: ['/sounds/3-beep.mp3', '/sounds/3-beep.wav'],
-            volume: 0.5,
-            onload: () => logService.debug('3-beep 音频加载完成'),
-            onerror: (id, error) => logService.error('3-beep 音频加载失败', { error: error.toString() })
-        }),
-        countdown: new Howl({
-            src: ['/sounds/countdown_audio.mp3', '/sounds/countdown_audio.wav'],
-            volume: 0.7,
-            onload: () => logService.debug('countdown 音频加载完成'),
-            onerror: (id, error) => logService.error('countdown 音频加载失败', { error: error.toString() })
-        })
-    }
+    // ✅ 修复：获取全局单例音频对象而非创建新对象
+    const sounds = getGlobalSounds()
 
     // 播放音频的通用方法
     function playSound(soundKey) {
@@ -110,18 +123,42 @@ export function useBuzzer() {
         logService.event('MUTE_TOGGLED', { isMuted: isMuted.value })
     }
 
-    // 初始化音频上下文（用于某些浏览器的自动播放限制）
+    // ✅ 修复：初始化音频上下文（用于某些浏览器的自动播放限制），返回初始化结果
     function initAudioContext() {
         try {
+            // 检查Howler.js是否可用
+            if (typeof Howl === 'undefined') {
+                logService.error('Howler.js不可用，音频播放功能不可用')
+                return false
+            }
+
             // 尝试加载音频以初始化上下文
-            Object.values(sounds).forEach(sound => {
+            let successCount = 0
+            let totalCount = 0
+
+            Object.entries(sounds).forEach(([key, sound]) => {
+                totalCount++
                 if (sound && typeof sound.load === 'function') {
-                    sound.load()
+                    try {
+                        sound.load()
+                        successCount++
+                        logService.debug(`音频已加载: ${key}`)
+                    } catch (loadError) {
+                        logService.warn(`音频加载失败: ${key}`, { error: loadError.message })
+                    }
                 }
             })
-            logService.info('音频上下文已初始化')
+
+            const allLoaded = successCount === totalCount
+            if (allLoaded) {
+                logService.info('✅ 音频上下文已初始化，所有音频已加载')
+            } else {
+                logService.warn(`⚠️ 音频部分加载失败 (成功: ${successCount}/${totalCount})`)
+            }
+            return allLoaded
         } catch (error) {
-            logService.error('初始化音频上下文失败', { error: error.message })
+            logService.error('❌ 初始化音频上下文失败', { error: error.message })
+            return false
         }
     }
 

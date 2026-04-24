@@ -45,7 +45,7 @@
               <div class="time-label">B屏剩余时间</div>
             </template>
             <template v-else>
-              <div class="time-value">{{ formatTime(timerState.currentStageRemaining) }}</div>
+              <div class="time-value">{{ formatTime(displayRemaining) }}</div>
               <div class="time-label">剩余时间</div>
             </template>
           </div>
@@ -66,7 +66,7 @@
             <div class="stage-name" :style="{ color: currentLightColor }">
               {{ timerState.currentStageName || '准备阶段' }}
             </div>
-            <div class="stage-timer">{{ formatTime(timerState.currentStageRemaining) }}</div>
+            <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
           </div>
         </div>
       </div>
@@ -141,8 +141,16 @@ const buzzer = useBuzzer()
 
 // 初始化音频上下文
 onMounted(() => {
-  buzzer.initAudioContext()
-  logService.event('BUZZER_INITIALIZED', { isMuted: buzzer.isMuted.value })
+  // ✅ 修复：检查初始化结果，并记录日志
+  const audioInitialized = buzzer.initAudioContext()
+
+  if (!audioInitialized) {
+    logService.warn('B屏: 音频初始化失败')
+  } else {
+    logService.debug('B屏: 音频初始化成功')
+  }
+
+  logService.event('BUZZER_INITIALIZED', { isMuted: buzzer.isMuted.value, audioInitialized })
 })
 
 // 状态
@@ -150,6 +158,8 @@ const isFullScreen = ref(false)
 const showAlternateInfo = ref(false)
 const previousLightColor = ref(null)
 const lastBuzzedPhase = ref(null)
+const lastBuzzTime = ref(0)  // ✅ 新增：记录上次鸣笛的时间戳
+const buzzCooldownMs = 500   // ✅ 新增：鸣笛冷却时间（毫秒），防止频繁鸣笛
 
 // 计算属性
 const isActiveScreen = computed(() => {
@@ -191,6 +201,11 @@ const currentLightColor = computed(() => {
 
 const currentScreenRemaining = computed(() => {
   return timerState.screenBRemaining || timerState.currentStageRemaining
+})
+
+// 获取显示的剩余时间 - 用于实时显示
+const displayRemaining = computed(() => {
+  return timerStore.getDisplayRemaining()
 })
 
 const screenStatus = computed(() => {
@@ -269,19 +284,22 @@ const initializeConnection = () => {
 const playSound = () => {
   if (!timerState.soundEnabled) return
 
+  // ✅ 改进：使用阶段变化时间戳而不仅是名称
+  const now = Date.now()
   const stageName = timerState.currentStageName || ''
   const currentPhase = stageName.includes('准备') ? 'prepare' :
                        stageName.includes('比赛') || stageName.includes('射击') ? 'competition' : null
 
-  // 避免重复鸣笛同一阶段 - 仅1声和2声使用阶段名称
-  if (currentPhase && currentPhase !== lastBuzzedPhase.value) {
+  // ✅ 修复：添加冷却时间，防止快速重复鸣笛
+  if (currentPhase && (currentPhase !== lastBuzzedPhase.value || now - lastBuzzTime.value > buzzCooldownMs)) {
     lastBuzzedPhase.value = currentPhase
+    lastBuzzTime.value = now
 
     if (stageName.includes('准备')) {
-      logService.event('STAGE_TRANSITION', { stage: '准备', action: '发出1声鸣笛' })
+      logService.event('STAGE_TRANSITION', { stage: '准备', action: '发出1声鸣笛', time: now })
       buzzer.buzz1()
     } else if (stageName.includes('比赛') || stageName.includes('射击')) {
-      logService.event('STAGE_TRANSITION', { stage: '比赛', action: '发出2声鸣笛' })
+      logService.event('STAGE_TRANSITION', { stage: '比赛', action: '发出2声鸣笛', time: now })
       buzzer.buzz2()
     }
   }
@@ -293,10 +311,19 @@ const checkLightColorTransition = () => {
 
   const currentColor = currentLightColor.value
 
+  // ✅ 修复：重置previousLightColor当计时器空闲时
+  if (timerState.status === 'idle') {
+    previousLightColor.value = null
+    lastBuzzedPhase.value = null
+    lastBuzzTime.value = 0
+    return
+  }
+
   // 检测GREEN→YELLOW转换
   if (previousLightColor.value === '#00FF00' && currentColor === '#FFFF00') {
     logService.event('LIGHT_TRANSITION', { from: 'GREEN', to: 'YELLOW', action: '发出3声鸣笛' })
     buzzer.buzz3()
+    lastBuzzTime.value = Date.now()
   }
 
   previousLightColor.value = currentColor
@@ -356,7 +383,6 @@ const handleKeyDown = (event) => {
   }
 }
 
-// 监听状态变化
 watch(() => timerState.currentStageName, (newStage, oldStage) => {
   if (newStage && newStage !== oldStage) {
     // 显示阶段变化提示

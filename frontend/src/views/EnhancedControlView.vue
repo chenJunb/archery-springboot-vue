@@ -16,6 +16,7 @@
               placeholder="请选择比赛类型"
               size="large"
               style="width: 100%"
+              :disabled="!canModifyConfig"
               @change="handleMatchTypeChange"
             >
               <el-option
@@ -29,6 +30,11 @@
             <!-- 比赛类型描述 -->
             <div class="match-type-desc" v-if="currentMatchType">
               {{ currentMatchType.description }}
+            </div>
+
+            <!-- 运行中禁用提示 -->
+            <div v-if="!canModifyConfig" style="color: #ff9800; font-size: 12px; margin-top: 8px;">
+              ⚠️ 计时进行中，无法修改配置。请暂停或重置后再修改。
             </div>
           </div>
         </div>
@@ -47,6 +53,7 @@
                 :min="0"
                 :max="300"
                 :step="1"
+                :disabled="!canModifyConfig"
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
@@ -60,6 +67,7 @@
                 :min="0"
                 :max="600"
                 :step="1"
+                :disabled="!canModifyConfig"
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
@@ -73,6 +81,7 @@
                 :min="0"
                 :max="60"
                 :step="1"
+                :disabled="!canModifyConfig"
                 size="small"
                 placeholder="秒"
                 @change="updateTimeConfig"
@@ -92,7 +101,7 @@
             <span>屏幕控制模式</span>
           </div>
           <div class="section-content">
-            <el-radio-group v-model="screenMode" @change="handleScreenModeChange">
+            <el-radio-group v-model="screenMode" :disabled="!canModifyConfig" @change="handleScreenModeChange">
               <el-radio value="sync" border>同步模式</el-radio>
               <el-radio value="alternate" border>AB交替模式</el-radio>
               <el-radio value="only_a" border>仅A屏</el-radio>
@@ -309,7 +318,7 @@
                 </template>
                 <template v-else>
                   <div class="timer-label">剩余时间</div>
-                  <div class="timer-value">{{ formatTime(timerState.currentStageRemaining) }}</div>
+                  <div class="timer-value">{{ formatTime(displayRemaining) }}</div>
                 </template>
               </div>
 
@@ -325,7 +334,7 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ formatTime(timerState.currentStageRemaining) }}</div>
+              <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
             </div>
           </div>
         </div>
@@ -365,7 +374,7 @@
                 </template>
                 <template v-else>
                   <div class="timer-label">剩余时间</div>
-                  <div class="timer-value">{{ formatTime(timerState.currentStageRemaining) }}</div>
+                  <div class="timer-value">{{ formatTime(displayRemaining) }}</div>
                 </template>
               </div>
 
@@ -381,7 +390,7 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ formatTime(timerState.currentStageRemaining) }}</div>
+              <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
             </div>
           </div>
         </div>
@@ -480,8 +489,23 @@ const buzzer = useBuzzer()
 
 // 初始化音频上下文
 onMounted(() => {
-  buzzer.initAudioContext()
-  logService.event('CONTROL_VIEW_INITIALIZED', { soundEnabled: soundEnabled.value })
+  // ✅ 修复：检查初始化结果，如果失败则显示用户提示
+  const audioInitialized = buzzer.initAudioContext()
+
+  if (!audioInitialized) {
+    ElMessage.warning({
+      message: '⚠️ 音频初始化失败，声音功能可能不可用。请检查浏览器设置和音频文件。',
+      duration: 5000
+    })
+    logService.warn('音频初始化失败，用户已通知')
+  } else {
+    logService.debug('音频初始化成功')
+  }
+
+  logService.event('CONTROL_VIEW_INITIALIZED', {
+    soundEnabled: soundEnabled.value,
+    audioInitialized: audioInitialized
+  })
 })
 
 // 数据
@@ -532,8 +556,19 @@ const canReset = computed(() => {
   return timerStore.isTimerRunning() || timerStore.isTimerFinished()
 })
 
+// 是否可以修改配置 - 只有在非运行状态下才能修改
+const canModifyConfig = computed(() => {
+  const status = timerState.status
+  return status === 'idle' || status === 'paused' || status === 'finished'
+})
+
 const isTimerPaused = computed(() => timerStore.isTimerPaused())
 const isControlClient = computed(() => timerStore.isControlClient())
+
+// 获取显示的剩余时间 - 用于实时显示
+const displayRemaining = computed(() => {
+  return timerStore.getDisplayRemaining()
+})
 
 const soundButtonType = computed(() => {
   return timerState.soundEnabled ? 'success' : 'info'
@@ -582,7 +617,7 @@ const fetchEnhancedMatchTypes = async () => {
       }
     }
   } catch (error) {
-    console.error('获取比赛类型失败:', error)
+    logService.error('获取比赛类型失败:', error)
   }
 }
 
@@ -618,13 +653,26 @@ const handleMatchTypeChange = (matchTypeId) => {
   if (matchType) {
     currentMatchType.value = matchType
     loadMatchTypeConfig(matchType)
+
+    // 重置AB屏和控制按钮到初始状态
+    resetABScreenState()
   }
 }
 
 const handleScreenModeChange = (mode) => {
   if (timerStore.connectionState.isConnected) {
     timerStore.setABMode(mode)
+
+    // 重置AB屏和控制按钮到初始状态
+    resetABScreenState()
   }
+}
+
+// 重置AB屏和控制按钮到初始状态
+const resetABScreenState = () => {
+  // 当比赛类型或配置更改时，重置屏幕到初始状态
+  // 这会让后端根据新的比赛类型配置重新初始化屏幕状态
+  logService.debug('配置已更改，AB屏状态将根据新的比赛类型重新初始化')
 }
 
 const updateTimeConfig = () => {
@@ -637,16 +685,19 @@ const updateTimeConfig = () => {
   }
 
   // 通过WebSocket发送时间配置更新
-  timerStore.sendWebSocketMessage('/app/timer/set-time-config', config)
+  timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
+
+  // 重置AB屏和控制按钮到初始状态
+  resetABScreenState()
 }
 
 const updatePrompt = (screen, prompt) => {
-  console.log(`更新${screen}屏提示文案: "${prompt}"，连接状态:`, timerStore.connectionState)
+  logService.debug(`更新${screen}屏提示文案: "${prompt}"，连接状态:`, timerStore.connectionState)
   if (timerStore.connectionState.isConnected && timerStore.connectionState.clientId) {
     timerStore.setPrompt(screen, prompt)
-    console.log(`✅ 已发送${screen}屏提示文案到服务器`)
+    logService.debug(`✅ 已发送${screen}屏提示文案到服务器`)
   } else {
-    console.log(`⏳ ${screen}屏提示文案已保存，等待WebSocket连接后发送`)
+    logService.debug(`⏳ ${screen}屏提示文案已保存，等待WebSocket连接后发送`)
     // 保存到本地状态，等连接后重新发送
     if (screen === 'A') {
       timerState.aPrompt = prompt
@@ -657,22 +708,22 @@ const updatePrompt = (screen, prompt) => {
 }
 
 const startTimer = () => {
-  console.log('点击开始按钮，连接状态:', timerStore.connectionState)
+  logService.debug('点击开始按钮，连接状态:', timerStore.connectionState)
   if (timerStore.connectionState.isConnected) {
-    console.log('发送开始计时消息')
+    logService.debug('发送开始计时消息')
     timerStore.startTimer()
   } else {
-    console.error('WebSocket未连接，无法发送开始计时消息')
+    logService.error('WebSocket未连接，无法发送开始计时消息')
   }
 }
 
 const pauseTimer = () => {
-  console.log('点击暂停按钮，连接状态:', timerStore.connectionState)
+  logService.debug('点击暂停按钮，连接状态:', timerStore.connectionState)
   if (timerStore.connectionState.isConnected) {
-    console.log('发送暂停计时消息')
+    logService.debug('发送暂停计时消息')
     timerStore.pauseTimer()
   } else {
-    console.error('WebSocket未连接，无法发送暂停计时消息')
+    logService.error('WebSocket未连接，无法发送暂停计时消息')
   }
 }
 
@@ -718,7 +769,7 @@ const manualBuzzer = () => {
 
   // 同时发送消息到所有屏幕
   if (timerStore.connectionState.isConnected) {
-    timerStore.sendWebSocketMessage('/app/timer/manual-buzzer', { type: 'manual' })
+    timerStore.sendGlobalWebSocketMessage('timer/manual-buzzer', { type: 'manual' })
   }
 }
 
@@ -730,15 +781,20 @@ const copyScreenUrl = (screen) => {
 }
 
 const formatTime = (seconds) => {
-  if (seconds == null || seconds < 0) return '0'
-  // 只显示秒数，不显示分钟
-  return `${seconds}秒`
+  // ✅ 修复：统一返回 MM:SS 格式，与其他视图保持一致
+  if (seconds == null || seconds < 0) return '00:00'
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
 const formatAbTime = (seconds) => {
-  if (seconds == null || seconds < 0) return '0'
-  // AB交替模式下也只显示秒数
-  return `${seconds}秒`
+  // ✅ 修复：AB交替模式下显示 HH:MM:SS 格式
+  if (seconds == null || seconds < 0) return '00:00:00'
+  const hours = Math.floor(seconds / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
 const formatServerTime = (timestamp) => {
@@ -766,15 +822,15 @@ watch(() => timerState, (newState) => {
   }
 
   // 更新时间配置
-  if (newState.preparationTime && newState.preparationTime !== preparationTime.value) {
+  if (newState.preparationTime !== undefined && newState.preparationTime !== preparationTime.value) {
     preparationTime.value = newState.preparationTime
   }
 
-  if (newState.competitionTime && newState.competitionTime !== competitionTime.value) {
+  if (newState.competitionTime !== undefined && newState.competitionTime !== competitionTime.value) {
     competitionTime.value = newState.competitionTime
   }
 
-  if (newState.yellowLightTime && newState.yellowLightTime !== yellowLightTime.value) {
+  if (newState.yellowLightTime !== undefined && newState.yellowLightTime !== yellowLightTime.value) {
     yellowLightTime.value = newState.yellowLightTime
   }
 }, { deep: true })
@@ -792,13 +848,23 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  // 清理事件监听器和定时器
-  document.removeEventListener('keydown', handleKeyDown)
+  // 清理资源
 })
 
 const subscribeToTopics = () => {
-  // 这里可以添加更多主题订阅
-  logService.debug('订阅WebSocket主题...')
+  if (!timerStore.connectionState.isConnected) {
+    logService.debug('未连接到WebSocket，无法订阅主题，将在连接后自动订阅')
+    return
+  }
+
+  // 订阅计时器状态更新
+  if (timerStore.subscribe && typeof timerStore.subscribe === 'function') {
+    timerStore.subscribe('timer_state', (data) => {
+      logService.debug('收到计时器状态更新', data)
+    })
+  }
+
+  logService.debug('✅ WebSocket主题订阅完成')
 }
 </script>
 
@@ -813,11 +879,13 @@ const subscribeToTopics = () => {
   display: flex;
   height: 100%;
   gap: 20px;
+  overflow: hidden; /* 防止容器溢出 */
 }
 
 /* 左侧控制面板 */
 .control-left-panel {
-  flex: 0 0 500px; /* 从400px增加到500px，提供更多操作空间 */
+  flex: 0 0 auto;
+  width: 450px; /* 自适应宽度，min/max可根据需要调整 */
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -826,6 +894,7 @@ const subscribeToTopics = () => {
   padding: 20px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   overflow-y: auto;
+  max-height: 100%; /* 确保不超过容器高度 */
 }
 
 /* 右侧显示区域 */
@@ -836,7 +905,7 @@ const subscribeToTopics = () => {
   gap: 16px;
   min-width: 0; /* 防止内容溢出 */
   overflow-y: auto; /* 允许垂直滚动 */
-  max-height: calc(100vh - 40px); /* 限制最大高度 */
+  max-height: 100%; /* 限制为父容器高度 */
 }
 
 /* 控制区域通用样式 */
@@ -1058,17 +1127,18 @@ const subscribeToTopics = () => {
 .screen-preview-container {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+  min-height: 0; /* 允许flex缩小 */
 }
 
 /* 额外屏幕容器 */
 .extra-screens-container {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 20px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
   opacity: 0.7;
   transition: opacity 0.3s ease;
 }
@@ -1100,7 +1170,10 @@ const subscribeToTopics = () => {
   overflow: hidden;
   border: 2px solid #333;
   transition: all 0.3s ease;
-  min-height: 380px; /* 确保最小高度 */
+  display: flex;
+  flex-direction: column;
+  min-height: 320px; /* 降低最小高度 */
+  max-height: 450px; /* 设置最大高度，防止过大 */
 }
 
 .screen-preview.active {
@@ -1124,45 +1197,52 @@ const subscribeToTopics = () => {
 }
 
 .screen-content {
-  padding: 24px;
-  height: calc(100% - 56px);
+  padding: 16px;
+  flex: 1;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .screen-prompt {
-  font-size: 18px;  /* 从24px缩小到18px */
+  font-size: 16px;  /* 从18px缩小到16px */
   font-weight: bold;
   text-align: center;
   color: #fff;
-  margin-bottom: 20px; /* 从32px缩小到20px */
-  min-height: 24px;
+  margin-bottom: 12px; /* 从20px缩小到12px */
+  min-height: 20px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .screen-status {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  margin-bottom: 32px;
+  gap: 12px;
+  margin-bottom: 16px;
   position: relative;
+  flex-shrink: 0;
 }
 
 .status-light {
-  width: 90px;  /* 从120px缩小到90px */
-  height: 90px; /* 从120px缩小到90px */
+  width: 80px;  /* 从90px缩小到80px */
+  height: 80px; /* 从90px缩小到80px */
   border-radius: 50%;
   position: relative;
   box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
 .light-glow {
   position: absolute;
   top: 10px;
   left: 10px;
-  width: 70px;    /* 从100px缩小到70px */
-  height: 70px;   /* 从100px缩小到70px */
+  width: 60px;    /* 从70px缩小到60px */
+  height: 60px;   /* 从70px缩小到60px */
   border-radius: 50%;
   background: radial-gradient(circle at 18px 18px, rgba(255, 255, 255, 0.8), transparent);
   filter: blur(8px);
@@ -1170,16 +1250,17 @@ const subscribeToTopics = () => {
 
 .screen-timer {
   text-align: center;
+  flex-shrink: 0;
 }
 
 .timer-label {
-  font-size: 14px;
+  font-size: 12px;
   color: #999;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .timer-value {
-  font-size: 36px;  /* 从48px缩小到36px */
+  font-size: 32px;  /* 从36px缩小到32px */
   font-weight: bold;
   font-family: 'Courier New', monospace;
   color: #fff;
@@ -1219,39 +1300,51 @@ const subscribeToTopics = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid #333;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .stage-name {
-  font-size: 18px;
+  font-size: 14px;
   font-weight: 600;
   color: #fff;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-timer {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: bold;
   font-family: 'Courier New', monospace;
   color: #fff;
+  flex-shrink: 0;
 }
 
 /* 系统状态信息 */
 .system-status {
   background-color: white;
   border-radius: 8px;
-  padding: 16px;
+  padding: 12px 16px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   display: flex;
   justify-content: space-around;
-  gap: 16px;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0; /* 防止被压缩 */
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 6px;
+  font-size: 13px;
+  flex: 0 1 auto;
+  white-space: nowrap;
 }
 
 .status-item .el-icon {
@@ -1305,6 +1398,12 @@ const subscribeToTopics = () => {
 }
 
 /* 响应式调整 */
+@media (max-width: 1400px) {
+  .control-left-panel {
+    width: 380px;
+  }
+}
+
 @media (max-width: 1200px) {
   .control-container {
     flex-direction: column;
@@ -1312,17 +1411,27 @@ const subscribeToTopics = () => {
 
   .control-left-panel {
     flex: none;
+    width: 100%;
     max-width: 100%;
+    max-height: 40vh; /* 限制左侧面板的最大高度 */
   }
 
   .control-right-panel {
-    flex: none;
+    flex: 1;
+    max-height: 60vh; /* 右侧预览区约60% */
+    overflow-y: auto;
   }
 
   /* 中等屏幕下的屏幕预览布局 */
   .screen-preview-container,
   .extra-screens-container {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 12px;
+  }
+
+  .screen-preview {
+    min-height: 280px;
+    max-height: 360px;
   }
 }
 
@@ -1332,8 +1441,15 @@ const subscribeToTopics = () => {
   }
 
   .control-left-panel {
-    padding: 15px;
-    flex: 0 0 auto; /* 移动端不要固定宽度 */
+    padding: 12px;
+    width: 100%;
+    max-height: auto;
+    flex: 0 0 auto;
+  }
+
+  .control-right-panel {
+    flex: 1;
+    max-height: auto;
   }
 
   .button-row {
@@ -1342,18 +1458,18 @@ const subscribeToTopics = () => {
 
   .system-status {
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
 
   .timer-value {
     font-size: 36px;
   }
 
-  /* 屏幕预览容器在移动端的响应式 */
+  /* 屏幕预览容器在平板/移动端的响应式 */
   .screen-preview-container,
   .extra-screens-container {
-    grid-template-columns: 1fr;
-    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 12px;
   }
 
   .screen-preview-header {
@@ -1367,8 +1483,10 @@ const subscribeToTopics = () => {
   }
 
   .screen-preview {
-    min-height: 320px;
+    min-height: 260px;
+    max-height: 340px;
   }
+}
 
   .status-light {
     width: 70px;

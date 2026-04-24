@@ -68,7 +68,11 @@ const timerState = reactive({
 
   // 配置信息
   soundEnabled: true,
-  volume: 80
+  volume: 80,
+
+  // 本地计时辅助字段（用于前端实时显示，不从后端同步）
+  localDisplayRemaining: 0,  // 本地显示的剩余时间
+  localLastUpdateTime: 0      // 本地上次更新时间
 })
 
 // 比赛类型数据
@@ -76,6 +80,38 @@ const enhancedMatchTypes = ref([])
 
 // 注销全局消息监听的函数集合（用于清理）
 const unsubscribeCallbacks = []
+
+// 本地计时器相关
+let localCountdownInterval = null
+let lastWebSocketUpdateTime = 0
+let lastWebSocketRemaining = 0
+
+// 启动本地计时器 - 提供实时显示效果
+function startLocalCountdown() {
+  if (localCountdownInterval) {
+    clearInterval(localCountdownInterval)
+  }
+
+  lastWebSocketUpdateTime = Date.now()
+  lastWebSocketRemaining = timerState.currentStageRemaining
+
+  localCountdownInterval = setInterval(() => {
+    if (timerState.status === 'running') {
+      const now = Date.now()
+      const elapsed = (now - lastWebSocketUpdateTime) / 1000
+      const newRemaining = Math.max(0, lastWebSocketRemaining - elapsed)
+      timerState.localDisplayRemaining = Math.round(newRemaining * 10) / 10
+    }
+  }, 100)
+}
+
+// 停止本地计时器
+function stopLocalCountdown() {
+  if (localCountdownInterval) {
+    clearInterval(localCountdownInterval)
+    localCountdownInterval = null
+  }
+}
 
 // 初始化消息监听
 function initMessageListeners() {
@@ -107,8 +143,42 @@ function initMessageListeners() {
 
       case 'timer_state':
         logService.debug('📥 收到计时器状态更新')
-        // 合并状态更新，保留已有的值
+
+        // ✅ 保护用户正在编辑的字段 - 防止WebSocket状态覆盖用户输入
+        const protectedFields = [
+          'aPrompt',              // A屏提示
+          'bPrompt',              // B屏提示
+          'preparationTime',      // 准备时间
+          'competitionTime',      // 比赛时间
+          'yellowLightTime'       // 黄灯时间
+        ]
+
+        // ✅ CRITICAL: 必须在覆盖之前备份受保护的字段
+        const backup = {}
+        protectedFields.forEach(field => {
+          backup[field] = timerState[field]
+        })
+        logService.debug('📋 已备份受保护字段', { backup })
+
+        // ✅ 合并服务器状态到timerState（会暂时覆盖所有字段）
         Object.assign(timerState, data)
+
+        // ✅ 立即恢复受保护的字段（用户正在编辑的值）
+        // 这样即使服务器发送了这些字段，也不会覆盖用户的本地输入
+        Object.assign(timerState, backup)
+        logService.debug('✅ 已恢复受保护字段')
+
+        // 同步本地计时 - 更新基准时间和剩余时间
+        lastWebSocketUpdateTime = Date.now()
+        lastWebSocketRemaining = data.currentStageRemaining || 0
+        timerState.localDisplayRemaining = lastWebSocketRemaining
+
+        // 根据计时器状态管理本地计时器
+        if (data.status === 'running') {
+          startLocalCountdown()
+        } else if (data.status === 'paused' || data.status === 'idle' || data.status === 'finished') {
+          stopLocalCountdown()
+        }
         break
 
       case 'matchTypes':
@@ -191,10 +261,24 @@ export function useEnhancedTimerStore() {
   // 检查当前屏幕是否是活动屏幕
   const isActiveScreen = (screen = null) => {
     const state = timerState
-    if (state.abMode === 'sync' || state.abMode === 'only_a' || state.abMode === 'only_b') {
+
+    // ✅ 修复：不同模式的处理逻辑
+    if (state.abMode === 'sync') {
+      // 同步模式：所有屏幕都是活动的
       return true
     }
 
+    if (state.abMode === 'only_a') {
+      // 仅A屏模式：只有A屏是活动的
+      return screen === 'A'
+    }
+
+    if (state.abMode === 'only_b') {
+      // 仅B屏模式：只有B屏是活动的
+      return screen === 'B'
+    }
+
+    // 交替模式：根据activeScreen判断
     if (screen) {
       return state.activeScreen === screen
     }
@@ -322,38 +406,65 @@ export function useEnhancedTimerStore() {
 
   // 订阅相关主题
   const subscribeToTopics = () => {
+    // ✅ 修复：清理之前的订阅
+    unsubscribeCallbacks.forEach(cb => cb?.unsubscribe?.())
+    unsubscribeCallbacks.length = 0
+
+    // ✅ 修复：订阅并存储unsubscribe函数
     // 订阅计时器状态
-    subscribeToTopic('/topic/timer-state', (data) => {
+    const sub1 = subscribeToTopic('/topic/timer-state', (data) => {
       Object.assign(timerState, data)
     })
+    if (sub1) unsubscribeCallbacks.push(sub1)
 
     // 订阅比赛类型
-    subscribeToTopic('/topic/match-types', (data) => {
+    const sub2 = subscribeToTopic('/topic/match-types', (data) => {
       if (data.type === 'matchTypes' && data.success) {
         enhancedMatchTypes.value = data.data
       }
     })
+    if (sub2) unsubscribeCallbacks.push(sub2)
 
     // 订阅AB屏模式配置
-    subscribeToTopic('/topic/match-type-screen-mode', (data) => {
+    const sub3 = subscribeToTopic('/topic/match-type-screen-mode', (data) => {
       logService.debug('📋 收到AB屏模式配置:', data)
     })
+    if (sub3) unsubscribeCallbacks.push(sub3)
 
     // 订阅比赛类型详细信息
-    subscribeToTopic('/topic/match-type-details', (data) => {
+    const sub4 = subscribeToTopic('/topic/match-type-details', (data) => {
       logService.debug('📋 收到比赛类型详细信息:', data)
     })
+    if (sub4) unsubscribeCallbacks.push(sub4)
 
     // 订阅鸣笛
-    subscribeToTopic('/topic/buzzer', (data) => {
+    const sub5 = subscribeToTopic('/topic/buzzer', (data) => {
       logService.debug('📢 收到鸣笛通知:', data)
       // 这里可以播放鸣笛声音
     })
+    if (sub5) unsubscribeCallbacks.push(sub5)
+
+    logService.debug(`✅ 已订阅 ${unsubscribeCallbacks.length} 个主题`)
   }
 
   // 广播状态请求
   const requestBroadcastState = () => {
     sendGlobalWebSocketMessage('timer/broadcast-state', {})
+  }
+
+  // 获取显示用的剩余时间 - 用于前端实时显示
+  const getDisplayRemaining = () => {
+    if (timerState.status === 'running' && timerState.localDisplayRemaining > 0) {
+      return timerState.localDisplayRemaining
+    }
+    return timerState.currentStageRemaining || 0
+  }
+
+  // 清理本地计时器
+  const cleanup = () => {
+    stopLocalCountdown()
+    unsubscribeCallbacks.forEach(cb => cb())
+    unsubscribeCallbacks.length = 0
   }
 
   return {
@@ -393,7 +504,11 @@ export function useEnhancedTimerStore() {
     setPrompt,
     setSoundEnabled,
     setVolume,
-    manualBuzzer
+    manualBuzzer,
+
+    // 显示相关方法
+    getDisplayRemaining,
+    cleanup
   }
 }
 

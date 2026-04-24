@@ -45,7 +45,7 @@
               <div class="time-label">A屏剩余时间</div>
             </template>
             <template v-else>
-              <div class="time-value">{{ formatTime(timerState.currentStageRemaining) }}</div>
+              <div class="time-value">{{ formatTime(displayRemaining) }}</div>
               <div class="time-label">剩余时间</div>
             </template>
           </div>
@@ -66,7 +66,7 @@
             <div class="stage-name" :style="{ color: currentLightColor }">
               {{ timerState.currentStageName || '准备阶段' }}
             </div>
-            <div class="stage-timer">{{ formatTime(timerState.currentStageRemaining) }}</div>
+            <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
           </div>
         </div>
       </div>
@@ -141,8 +141,16 @@ const buzzer = useBuzzer()
 
 // 初始化音频上下文
 onMounted(() => {
-  buzzer.initAudioContext()
-  logService.event('BUZZER_INITIALIZED', { isMuted: buzzer.isMuted.value })
+  // ✅ 修复：检查初始化结果，并记录日志
+  const audioInitialized = buzzer.initAudioContext()
+
+  if (!audioInitialized) {
+    logService.warn('A屏: 音频初始化失败')
+  } else {
+    logService.debug('A屏: 音频初始化成功')
+  }
+
+  logService.event('BUZZER_INITIALIZED', { isMuted: buzzer.isMuted.value, audioInitialized })
 })
 
 // 状态
@@ -191,6 +199,11 @@ const currentLightColor = computed(() => {
 
 const currentScreenRemaining = computed(() => {
   return timerState.screenARemaining || timerState.currentStageRemaining
+})
+
+// 获取显示的剩余时间 - 用于实时显示
+const displayRemaining = computed(() => {
+  return timerStore.getDisplayRemaining()
 })
 
 const screenStatus = computed(() => {
