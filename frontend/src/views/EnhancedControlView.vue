@@ -632,11 +632,6 @@ const loadMatchTypeConfig = (matchType) => {
   competitionTime.value = matchType.competitionTime || 180
   yellowLightTime.value = matchType.yellowLightTime || 30
 
-  // ✅ 修复：初始化AB屏的剩余时间为总比赛时间
-  const totalTime = (matchType.preparationTime || 10) + (matchType.competitionTime || 180)
-  timerState.screenARemaining = totalTime
-  timerState.screenBRemaining = totalTime
-
   // 设置AB屏模式
   screenMode.value = matchType.defaultScreenMode || 'alternate'
 
@@ -811,19 +806,23 @@ const copyScreenUrl = (screen) => {
 }
 
 const formatTime = (seconds) => {
-  // ✅ 修复：统一返回 MM:SS 格式，与其他视图保持一致
+  // ✅ 修复：统一返回 MM:SS 格式，与其他视图保持一致，并确保秒数正确舍入
   if (seconds == null || seconds < 0) return '00:00'
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
+  // 转换为整数以避免浮点精度问题
+  const totalSeconds = Math.round(seconds)
+  const mins = Math.floor(totalSeconds / 60)
+  const secs = totalSeconds % 60
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
 const formatAbTime = (seconds) => {
-  // ✅ 修复：AB交替模式下显示 HH:MM:SS 格式
+  // ✅ 修复：AB交替模式下显示完整的时分秒，确保秒数正确舍入
   if (seconds == null || seconds < 0) return '00:00:00'
-  const hours = Math.floor(seconds / 3600)
-  const mins = Math.floor((seconds % 3600) / 60)
-  const secs = seconds % 60
+  // 转换为整数以避免浮点精度问题
+  const totalSeconds = Math.round(seconds)
+  const hours = Math.floor(totalSeconds / 3600)
+  const mins = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
   return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
