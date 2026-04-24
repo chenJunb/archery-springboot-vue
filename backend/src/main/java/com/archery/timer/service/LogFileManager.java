@@ -180,6 +180,7 @@ public class LogFileManager {
 
     /**
      * 清理旧日志文件
+     * ✅ 改进：正确删除超出限制的文件
      */
     private void cleanupOldLogFiles() {
         try {
@@ -192,19 +193,30 @@ public class LogFileManager {
                     .filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().matches("archery-timer_\\d{4}-\\d{2}-\\d{2}\\.log"))) {
 
-                // 按文件名（日期）排序，保留最新的maxLogFiles个文件
+                // ✅ 获取所有文件（不使用limit）
                 Path[] allFiles = files.sorted(Comparator.reverseOrder())
-                    .limit(maxLogFiles)
                     .toArray(Path[]::new);
 
-                // 检查是否需要清理
-                for (Path file : allFiles) {
-                    if (Files.exists(file)) {
-                        // 这里可以添加其他清理逻辑，比如删除超过30天的文件
-                    }
-                }
+                log.debug("日志目录中共有 {} 个日志文件", allFiles.length);
 
-                log.debug("当前保留 {} 个日志文件", allFiles.length);
+                // ✅ 删除超出限制的旧文件
+                if (allFiles.length > maxLogFiles) {
+                    int filesToDelete = allFiles.length - maxLogFiles;
+                    log.info("开始清理日志文件：删除 {} 个最旧的文件（保留 {} 个）", filesToDelete, maxLogFiles);
+
+                    for (int i = maxLogFiles; i < allFiles.length; i++) {
+                        try {
+                            Files.delete(allFiles[i]);
+                            log.info("✅ 已删除过期日志文件: {}", allFiles[i].getFileName());
+                        } catch (IOException e) {
+                            log.error("❌ 删除日志文件失败: {}", allFiles[i].getFileName(), e);
+                        }
+                    }
+
+                    log.info("✅ 日志文件清理完成，当前保留 {} 个日志文件", maxLogFiles);
+                } else {
+                    log.debug("当前保留 {} 个日志文件，无需清理", allFiles.length);
+                }
             }
         } catch (Exception e) {
             log.error("清理日志文件失败", e);

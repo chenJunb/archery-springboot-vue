@@ -25,7 +25,11 @@ const messageCallbacks = new Set()
 let reconnectAttempts = 0
 const maxReconnectAttempts = 5
 const reconnectDelay = 3000
+let exponentialBackoffMultiplier = 1         // ✅ 新增：指数退避倍数
+const maxBackoffDelay = 30000                // ✅ 新增：最大延迟30秒
+let periodicReconnectInterval = null         // ✅ 新增：定期重连的间隔ID
 let heartbeatInterval = null
+const maxMessageCallbacks = 100              // ✅ 新增：回调集合最大数量限制
 
 /**
  * 注册消息回调
@@ -33,26 +37,76 @@ let heartbeatInterval = null
  * @returns {Function} 注销函数
  */
 export function onGlobalWebSocketMessage(callback) {
+  // ✅ 防护：检查回调集合是否已满
+  if (messageCallbacks.size >= maxMessageCallbacks) {
+    logService.warn(`⚠️ 消息回调集合已达到上限(${maxMessageCallbacks})，忽略新回调注册`, {
+      currentSize: messageCallbacks.size
+    })
+    return () => {}  // 返回空函数
+  }
+
   messageCallbacks.add(callback)
+  logService.debug(`📍 消息回调已注册，当前数量: ${messageCallbacks.size}`)
 
   // 返回注销函数
   return () => {
-    messageCallbacks.delete(callback)
+    const deleted = messageCallbacks.delete(callback)
+    if (deleted) {
+      logService.debug(`📍 消息回调已卸载，当前数量: ${messageCallbacks.size}`)
+    }
   }
 }
 
 /**
  * 分发消息到所有回调
+ * ✅ 改进：添加错误记录和空检查
  */
 function broadcastMessage(type, data) {
+  if (messageCallbacks.size === 0) {
+    return  // 无回调，跳过处理
+  }
+
   logService.event('BROADCAST_MESSAGE', { type, callbackCount: messageCallbacks.size })
-  messageCallbacks.forEach(callback => {
+
+  let failedCount = 0
+  messageCallbacks.forEach((callback, index) => {
     try {
       callback(type, data)
     } catch (error) {
-      logService.error('消息回调执行失败', { type, error: error.message })
+      failedCount++
+      logService.error('消息回调执行失败', {
+        type,
+        callbackIndex: index,
+        error: error.message,
+        stack: error.stack
+      })
     }
   })
+
+  // ✅ 如果回调失败率太高，发出警告
+  if (failedCount > messageCallbacks.size * 0.5) {
+    logService.warn(`⚠️ 消息回调失败率过高: ${failedCount}/${messageCallbacks.size}`)
+  }
+}
+
+/**
+ * 验证计时器状态数据完整性
+ * ✅ 新增：确保数据有必要的字段
+ */
+function validateTimerState(data) {
+  if (!data || typeof data !== 'object') {
+    return false
+  }
+
+  // 验证必要字段（这些字段不能为null或undefined）
+  const requiredFields = [
+    'status',                // 状态：idle, running, paused, finished
+    'totalRemaining',        // 总剩余时间
+    'currentStageIndex',     // 当前阶段索引
+    'currentStageName'       // 当前阶段名称
+  ]
+
+  return requiredFields.every(field => field in data && data[field] !== undefined)
 }
 
 /**
@@ -70,8 +124,22 @@ function subscribeToAllTopics() {
   globalStompClient.subscribe('/topic/timer-state', (message) => {
     try {
       const data = JSON.parse(message.body)
-      logService.debug('收到计时器状态', { stageIndex: data.data?.currentStageIndex })
-      broadcastMessage('timer_state', data.data || data)
+      const timerData = data.data || data
+
+      // ✅ 验证数据完整性
+      if (!validateTimerState(timerData)) {
+        logService.warn('收到无效的计时器状态数据', {
+          data: timerData,
+          missingFields: Object.keys(timerData).filter(k => !timerData[k])
+        })
+        return  // 丢弃这个消息
+      }
+
+      logService.debug('收到有效的计时器状态', {
+        status: timerData.status,
+        remaining: timerData.totalRemaining
+      })
+      broadcastMessage('timer_state', timerData)
     } catch (error) {
       logService.error('解析计时器状态失败', { error: error.message })
     }
@@ -110,7 +178,14 @@ function subscribeToAllTopics() {
   globalStompClient.subscribe('/topic/clients', (message) => {
     try {
       const data = JSON.parse(message.body)
-      logService.debug('收到客户端状态', { clientCount: data?.clients?.length })
+
+      // ✅ 简单验证：检查clients是否是数组
+      if (!Array.isArray(data?.clients)) {
+        logService.warn('收到无效的客户端状态', { data })
+        return
+      }
+
+      logService.debug('收到客户端状态', { clientCount: data.clients.length })
       broadcastMessage('client_status', data)
     } catch (error) {
       logService.error('解析客户端状态失败', { error: error.message })
@@ -123,32 +198,23 @@ function subscribeToAllTopics() {
 /**
  * 启动心跳
  */
+/**
+ * 启动心跳
+ * ✅ 改进：STOMP客户端已内置心跳机制（15秒），无需额外实现
+ */
 function startHeartbeat() {
-  stopHeartbeat()
-
-  heartbeatInterval = setInterval(() => {
-    if (globalStompClient && globalStompClient.connected) {
-      try {
-        globalStompClient.publish({
-          destination: '/app/heartbeat',
-          body: JSON.stringify({ timestamp: Date.now() })
-        })
-        logService.debug('发送心跳')
-      } catch (error) {
-        logService.error('发送心跳失败:', error.message)
-      }
-    }
-  }, 10000) // 10秒发送一次
+  logService.info('STOMP心跳已启用（由STOMP客户端管理）')
+  // STOMP客户端通过heartbeatIncoming和heartbeatOutgoing自动管理
+  // 无需额外实现
 }
 
 /**
  * 停止心跳
+ * ✅ 改进：由STOMP客户端自动管理
  */
 function stopHeartbeat() {
-  if (heartbeatInterval) {
-    clearInterval(heartbeatInterval)
-    heartbeatInterval = null
-  }
+  logService.info('STOMP心跳将随连接关闭而停止')
+  // 不需要手动停止，连接关闭时自动停止
 }
 
 /**
@@ -166,8 +232,9 @@ export function initGlobalWebSocket() {
   const client = new Client({
     webSocketFactory: () => socket,
     reconnectDelay: 5000,
-    heartbeatIncoming: 4000,
-    heartbeatOutgoing: 4000,
+    heartbeatIncoming: 15000,   // ✅ 改为15秒（从4秒）
+    heartbeatOutgoing: 15000,   // ✅ 改为15秒（从4秒）
+    heartbeatErrorMargin: 5000, // ✅ 添加5秒误差容限（新增）
     onConnect: () => {
       logService.event('WEBSOCKET_CONNECTED', { reconnectAttempts })
       reconnectAttempts = 0
@@ -190,15 +257,38 @@ export function initGlobalWebSocket() {
       broadcastMessage('disconnected', null)
       stopHeartbeat()
 
-      // 尝试重连
+      // ✅ 快速重连阶段（前5次）
       if (reconnectAttempts < maxReconnectAttempts) {
         reconnectAttempts++
-        logService.warn(`尝试重连 (${reconnectAttempts}/${maxReconnectAttempts})`)
+
+        // ✅ 使用指数退避算法
+        const backoffDelay = Math.min(
+          reconnectDelay * exponentialBackoffMultiplier,
+          maxBackoffDelay
+        )
+        exponentialBackoffMultiplier *= 2
+
+        logService.warn(`尝试快速重连 (${reconnectAttempts}/${maxReconnectAttempts})，延迟${backoffDelay}ms`)
         setTimeout(() => {
           initGlobalWebSocket()
-        }, reconnectDelay)
+        }, backoffDelay)
       } else {
-        logService.error('达到最大重连次数，放弃连接', { maxAttempts: maxReconnectAttempts })
+        // ✅ 快速重连失败，启用定期重连
+        logService.warn('已达快速重连上限(5次)，启用定期重连机制(每30秒重试一次)')
+
+        if (!periodicReconnectInterval) {
+          periodicReconnectInterval = setInterval(() => {
+            logService.info('执行定期重连尝试...')
+            // 重置计数器，重新开始快速重连阶段
+            reconnectAttempts = 0
+            exponentialBackoffMultiplier = 1
+            clearInterval(periodicReconnectInterval)
+            periodicReconnectInterval = null
+            initGlobalWebSocket()
+          }, 30000) // 每30秒尝试一次
+
+          logService.info('定期重连机制已启用，每30秒尝试一次')
+        }
       }
     },
     onStompError: (error) => {
@@ -219,6 +309,13 @@ export function disconnectGlobalWebSocket() {
   if (globalStompClient) {
     logService.info('断开 WebSocket 连接...')
     stopHeartbeat()
+
+    // ✅ 清理定期重连
+    if (periodicReconnectInterval) {
+      clearInterval(periodicReconnectInterval)
+      periodicReconnectInterval = null
+    }
+
     globalStompClient.deactivate()
     globalStompClient = null
     globalConnectionState.isConnected = false
@@ -287,11 +384,11 @@ export function getClientTypeFromRoute() {
 }
 
 /**
- * 发送消息
+ * 发送消息 - 自动注入clientId、clientType和timestamp
  */
 export function sendGlobalWebSocketMessage(destination, message) {
   if (!globalStompClient || !globalStompClient.connected) {
-    console.warn('⚠️ WebSocket 未连接，无法发送消息')
+    logService.warn('WebSocket 未连接，无法发送消息')
     return false
   }
 
@@ -301,14 +398,22 @@ export function sendGlobalWebSocketMessage(destination, message) {
       ? destination
       : `/app/${destination}`
 
+    // ✅ 自动注入客户端信息
+    const completeMessage = {
+      ...message,
+      clientId: globalConnectionState.clientId,
+      clientType: globalConnectionState.clientType,
+      timestamp: Date.now()
+    }
+
     globalStompClient.publish({
       destination: finalDestination,
-      body: JSON.stringify(message)
+      body: JSON.stringify(completeMessage)
     })
-    console.log(`✅ 发送消息到 ${finalDestination}:`, message)
+    logService.debug(`发送消息到 ${finalDestination}`, completeMessage)
     return true
   } catch (error) {
-    console.error('发送消息失败:', error)
+    logService.error('发送消息失败', { destination, error: error.message })
     return false
   }
 }
