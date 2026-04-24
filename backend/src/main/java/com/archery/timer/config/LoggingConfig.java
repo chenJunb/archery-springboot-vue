@@ -62,9 +62,21 @@ public class LoggingConfig {
     }
 
     /**
-     * 生成启动信息
+     * ✅ 改进：保护数字解析
      */
     private String generateStartupInfo() {
+        // ✅ 修复7.1: 安全地解析环境变量
+        int maxFilesFromEnv = maxLogFiles;
+        String envMaxFiles = System.getenv("LOGGING_FILE_MAX_FILES");
+        if (envMaxFiles != null && !envMaxFiles.isEmpty()) {
+            try {
+                maxFilesFromEnv = Integer.parseInt(envMaxFiles);
+            } catch (NumberFormatException e) {
+                log.warn("⚠️ 环境变量LOGGING_FILE_MAX_FILES格式无效: {}", envMaxFiles);
+                maxFilesFromEnv = maxLogFiles;
+            }
+        }
+
         return String.format(
             "===========================================\n" +
             "Archery Timer System Startup\n" +
@@ -90,13 +102,13 @@ public class LoggingConfig {
             System.getProperty("user.name"),
             System.getProperty("user.dir"),
             System.getenv("LOGGING_FILE_DIRECTORY") != null ? System.getenv("LOGGING_FILE_DIRECTORY") : "未设置",
-            System.getenv("LOGGING_FILE_MAX_FILES") != null ?
-                Integer.parseInt(System.getenv("LOGGING_FILE_MAX_FILES")) : maxLogFiles
+            maxFilesFromEnv
         );
     }
 
     /**
      * 清理旧日志文件
+     * ✅ 改进：修复排序问题，防止错误删除最新文件
      */
     private void cleanupOldLogFiles() {
         try {
@@ -109,12 +121,14 @@ public class LoggingConfig {
                     .filter(Files::isRegularFile)
                     .filter(path -> path.getFileName().toString().endsWith(".log"))) {
 
-                // 按修改时间倒序排序，保留最新的maxLogFiles个文件
+                // ✅ 修复7.2: 按修改时间倒序排序，异常时使用Long.MAX_VALUE保证不被删除
                 Stream<Path> sortedFiles = files.sorted(Comparator.comparing(path -> {
                     try {
                         return Files.getLastModifiedTime(path).toMillis();
                     } catch (IOException e) {
-                        return 0L;
+                        // ✅ 修复：返回Long.MAX_VALUE而非0，确保有问题的文件不会被删除
+                        log.warn("⚠️ 无法读取文件修改时间: {}", path);
+                        return Long.MAX_VALUE;
                     }
                 }, Comparator.reverseOrder()));
 
@@ -122,20 +136,23 @@ public class LoggingConfig {
                 Path[] allFiles = sortedFiles.toArray(Path[]::new);
 
                 if (allFiles.length > maxLogFiles) {
+                    log.info("日志文件数量({})超过限制({}), 将删除 {} 个旧文件",
+                            allFiles.length, maxLogFiles, allFiles.length - maxLogFiles);
+
                     for (int i = maxLogFiles; i < allFiles.length; i++) {
                         try {
                             Files.delete(allFiles[i]);
-                            log.info("删除旧日志文件: {}", allFiles[i].getFileName());
+                            log.info("✅ 删除旧日志文件: {}", allFiles[i].getFileName());
                         } catch (IOException e) {
-                            log.error("删除日志文件失败: {}", allFiles[i], e);
+                            log.error("❌ 删除日志文件失败: {}", allFiles[i], e);
                         }
                     }
                 }
             }
 
-            log.info("日志清理完成，保留最近 {} 个日志文件", maxLogFiles);
+            log.info("✅ 日志清理完成，保留最近 {} 个日志文件", maxLogFiles);
         } catch (Exception e) {
-            log.error("清理日志文件失败", e);
+            log.error("❌ 清理日志文件失败", e);
         }
     }
 }

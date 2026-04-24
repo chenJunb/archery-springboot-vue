@@ -26,10 +26,32 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // 注册STOMP端点，指定允许的来源
+        // ✅ 改进：处理origins，支持正则和简单URL
         String[] origins = allowedOrigins.split(",");
+
+        // ✅ 修复6.2: trim()去除空格
+        String[] trimmedOrigins = new String[origins.length];
+        for (int i = 0; i < origins.length; i++) {
+            trimmedOrigins[i] = origins[i].trim();
+        }
+
+        // ✅ 修复6.1: 将简单URL转换为regex模式
+        String[] patterns = new String[trimmedOrigins.length];
+        for (int i = 0; i < trimmedOrigins.length; i++) {
+            String origin = trimmedOrigins[i];
+            // 将简单的URL转换为regex模式（例如 "http://localhost:3000" -> "http://localhost:3000")
+            // 或者使用通配符模式 "http.*://localhost:3000"
+            if (origin.contains("*")) {
+                // 已经是通配符模式，直接使用
+                patterns[i] = origin;
+            } else {
+                // 转义特殊字符并转换为regex
+                patterns[i] = origin.replaceAll("\\.", "\\\\.").replaceAll(":", "\\\\:");
+            }
+        }
+
         registry.addEndpoint("/ws-archery-timer")
-                .setAllowedOriginPatterns(origins)
+                .setAllowedOriginPatterns(patterns)
                 .withSockJS();
     }
 }

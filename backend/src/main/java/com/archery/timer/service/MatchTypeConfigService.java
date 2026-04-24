@@ -41,21 +41,35 @@ public class MatchTypeConfigService {
 
     /**
      * 从配置文件加载比赛类型配置
+     * ✅ 改进：添加文件验证、配置验证和错误区分
      */
     private void loadMatchTypeConfig() {
         try {
             // 尝试从外部配置文件加载
             Path externalConfigPath = Paths.get("config/match-types.json");
-            if (Files.exists(externalConfigPath)) {
+
+            // ✅ 修复5.2: 检查是否真的是文件而不是目录
+            if (Files.exists(externalConfigPath) && Files.isRegularFile(externalConfigPath)) {
                 try (InputStream inputStream = Files.newInputStream(externalConfigPath)) {
                     Map<String, EnhancedMatchTypeDTO> loaded = objectMapper.readValue(
                             inputStream,
                             new TypeReference<Map<String, EnhancedMatchTypeDTO>>() {}
                     );
-                    matchTypes = loaded;
-                    log.info("从外部配置文件加载了 {} 种比赛类型", loaded.size());
-                    return;
+
+                    // ✅ 修复5.3: 验证加载的配置
+                    if (validateMatchTypesConfig(loaded)) {
+                        matchTypes = loaded;
+                        log.info("✅ 从外部配置文件加载了 {} 种比赛类型", loaded.size());
+                        return;
+                    } else {
+                        // ✅ 修复5.4: 区分配置无效和文件不存在
+                        log.error("❌ 外部配置文件格式无效或必需字段缺失，将使用默认配置");
+                    }
+                } catch (IOException e) {
+                    log.error("❌ 解析外部配置文件失败: {}", e.getMessage());
                 }
+            } else if (Files.exists(externalConfigPath)) {
+                log.warn("⚠️ config/match-types.json 是一个目录而非文件，跳过");
             }
 
             // 尝试从 classpath 加载
@@ -66,20 +80,68 @@ public class MatchTypeConfigService {
                             inputStream,
                             new TypeReference<Map<String, EnhancedMatchTypeDTO>>() {}
                     );
-                    matchTypes = loaded;
-                    log.info("从 classpath 配置文件加载了 {} 种比赛类型", loaded.size());
-                    return;
+
+                    // ✅ 修复5.3: 验证加载的配置
+                    if (validateMatchTypesConfig(loaded)) {
+                        matchTypes = loaded;
+                        log.info("✅ 从 classpath 配置文件加载了 {} 种比赛类型", loaded.size());
+                        return;
+                    } else {
+                        log.error("❌ Classpath配置文件格式无效或必需字段缺失，将使用默认配置");
+                    }
+                } catch (IOException e) {
+                    log.error("❌ 解析 classpath 配置文件失败: {}", e.getMessage());
                 }
             }
 
             // 如果配置文件不存在，使用默认配置
-            log.info("未找到配置文件，使用默认比赛类型配置");
+            log.info("📋 未找到配置文件，使用默认比赛类型配置");
             matchTypes = new HashMap<>(defaultMatchTypes);
 
-        } catch (IOException e) {
-            log.error("加载比赛类型配置失败，使用默认配置", e);
+        } catch (Exception e) {
+            log.error("❌ 加载比赛类型配置失败，使用默认配置", e);
             matchTypes = new HashMap<>(defaultMatchTypes);
         }
+    }
+
+    /**
+     * ✅ 新增：验证配置的有效性
+     * 检查必需的字段和数据完整性
+     */
+    private boolean validateMatchTypesConfig(Map<String, EnhancedMatchTypeDTO> config) {
+        if (config == null || config.isEmpty()) {
+            log.warn("⚠️ 配置为空或null");
+            return false;
+        }
+
+        // 验证每个比赛类型的必需字段
+        for (Map.Entry<String, EnhancedMatchTypeDTO> entry : config.entrySet()) {
+            String key = entry.getKey();
+            EnhancedMatchTypeDTO matchType = entry.getValue();
+
+            if (matchType == null) {
+                log.warn("⚠️ 配置项 '{}' 的值为null", key);
+                return false;
+            }
+
+            // 检查必需字段
+            if (matchType.getId() == null || matchType.getId().isEmpty()) {
+                log.warn("⚠️ 配置项 '{}' 缺少id字段", key);
+                return false;
+            }
+
+            if (matchType.getChineseName() == null || matchType.getChineseName().isEmpty()) {
+                log.warn("⚠️ 配置项 '{}' 缺少chineseName字段", key);
+                return false;
+            }
+
+            if (matchType.getTotalTime() == null || matchType.getTotalTime() < 0) {
+                log.warn("⚠️ 配置项 '{}' 的totalTime无效", key);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -106,8 +168,18 @@ public class MatchTypeConfigService {
     /**
      * 根据ID获取比赛类型
      */
+    /**
+     * ✅ 改进：添加null返回警告日志
+     */
     public EnhancedMatchTypeDTO getMatchType(String id) {
-        return matchTypes.get(id);
+        EnhancedMatchTypeDTO result = matchTypes.get(id);
+
+        // ✅ 修复5.6: Null返回时添加警告日志
+        if (result == null) {
+            log.warn("⚠️ 未找到比赛类型: {}", id);
+        }
+
+        return result;
     }
 
     /**
