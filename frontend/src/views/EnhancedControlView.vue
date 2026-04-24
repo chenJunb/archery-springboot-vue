@@ -314,11 +314,11 @@
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
                 <template v-if="screenMode === 'alternate'">
                   <div class="timer-label">A屏剩余</div>
-                  <div class="timer-value">{{ formatAbTime(timerState.screenARemaining) }}</div>
+                  <div class="timer-value">{{ Math.round(timerState.screenARemaining) }}</div>
                 </template>
                 <template v-else>
-                  <div class="timer-label">剩余时间</div>
-                  <div class="timer-value">{{ formatTime(displayRemaining) }}</div>
+                  <div class="timer-label">剩余秒数</div>
+                  <div class="timer-value">{{ Math.round(displayRemaining) }}</div>
                 </template>
               </div>
 
@@ -334,7 +334,7 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
+              <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>
         </div>
@@ -370,11 +370,11 @@
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
                 <template v-if="screenMode === 'alternate'">
                   <div class="timer-label">B屏剩余</div>
-                  <div class="timer-value">{{ formatAbTime(timerState.screenBRemaining) }}</div>
+                  <div class="timer-value">{{ Math.round(timerState.screenBRemaining) }}</div>
                 </template>
                 <template v-else>
-                  <div class="timer-label">剩余时间</div>
-                  <div class="timer-value">{{ formatTime(displayRemaining) }}</div>
+                  <div class="timer-label">剩余秒数</div>
+                  <div class="timer-value">{{ Math.round(displayRemaining) }}</div>
                 </template>
               </div>
 
@@ -390,7 +390,7 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
+              <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>
         </div>
@@ -421,7 +421,7 @@
                 </div>
                 <div class="screen-timer">
                   <div class="timer-label">等待配置</div>
-                  <div class="timer-value">--:--</div>
+                  <div class="timer-value">--</div>
                 </div>
                 <div class="screen-status-tag info">
                   待启用
@@ -429,7 +429,7 @@
               </div>
               <div class="stage-info">
                 <div class="stage-name">未配置阶段</div>
-                <div class="stage-timer">--:--</div>
+                <div class="stage-timer">--</div>
               </div>
             </div>
           </div>
@@ -803,27 +803,6 @@ const copyScreenUrl = (screen) => {
   navigator.clipboard.writeText(url)
     .then(() => ElMessage.success(`${screen}屏地址已复制到剪贴板`))
     .catch(err => ElMessage.error('复制失败: ' + err))
-}
-
-const formatTime = (seconds) => {
-  // ✅ 修复：统一返回 MM:SS 格式，与其他视图保持一致，并确保秒数正确舍入
-  if (seconds == null || seconds < 0) return '00:00'
-  // 转换为整数以避免浮点精度问题
-  const totalSeconds = Math.round(seconds)
-  const mins = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-}
-
-const formatAbTime = (seconds) => {
-  // ✅ 修复：AB交替模式下显示完整的时分秒，确保秒数正确舍入
-  if (seconds == null || seconds < 0) return '00:00:00'
-  // 转换为整数以避免浮点精度问题
-  const totalSeconds = Math.round(seconds)
-  const hours = Math.floor(totalSeconds / 3600)
-  const mins = Math.floor((totalSeconds % 3600) / 60)
-  const secs = totalSeconds % 60
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
 }
 
 const formatServerTime = (timestamp) => {
