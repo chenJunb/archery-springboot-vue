@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -490,7 +491,7 @@ public class TimerEngine {
         }
 
         // 更新阶段信息
-        updateCurrentStage(totalElapsedSeconds);
+        updateCurrentStage(totalElapsedSecondsInt);
 
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {
@@ -499,7 +500,7 @@ public class TimerEngine {
         }
 
         // 更新状态
-        currentState.setTotalElapsed(totalElapsedSeconds);
+        currentState.setTotalElapsed(totalElapsedSecondsInt);
         currentState.setTotalRemaining(totalRemainingSeconds);
         currentState.setLastUpdateTime(LocalDateTime.now());
         currentState.setTimestamp(now);
