@@ -86,6 +86,12 @@ let localCountdownInterval = null
 let lastWebSocketUpdateTime = 0
 let lastWebSocketRemaining = 0
 
+// ✅ 新增：为AB屏跟踪各自的本地倒计时
+let screenALastUpdateTime = 0
+let screenALastRemaining = 0
+let screenBLastUpdateTime = 0
+let screenBLastRemaining = 0
+
 // 启动本地计时器 - 提供实时显示效果
 function startLocalCountdown() {
   if (localCountdownInterval) {
@@ -452,6 +458,45 @@ export function useEnhancedTimerStore() {
     sendGlobalWebSocketMessage('timer/broadcast-state', {})
   }
 
+  // 获取AB屏实时剩余时间（使用本地倒计时）
+  // ✅ 修复：为AB屏提供流畅的秒级倒计时显示
+  const getCurrentScreenRemainingWithLocalCountdown = (screenType) => {
+    const isScreenA = screenType === 'A'
+    const screenRemaining = isScreenA ? timerState.screenARemaining : timerState.screenBRemaining
+    const screenStatus = isScreenA ? timerState.screenAStatus : timerState.screenBStatus
+
+    // 如果屏幕暂停，直接返回秒数值
+    if (screenStatus !== 'running') {
+      return screenRemaining || 0
+    }
+
+    // 屏幕运行中：使用本地倒计时提供实时显示
+    const now = Date.now()
+
+    if (isScreenA) {
+      // 如果A屏的值有更新，保存新的基准时间
+      if (screenALastRemaining !== screenRemaining || screenALastRemaining === 0) {
+        screenALastUpdateTime = now
+        screenALastRemaining = screenRemaining
+      }
+
+      // 计算已经过去的时间
+      const elapsed = (now - screenALastUpdateTime) / 1000
+      const newRemaining = Math.max(0, screenALastRemaining - elapsed)
+      return Math.round(newRemaining * 10) / 10  // 保留1位小数以获得更平滑的显示
+    } else {
+      // B屏逻辑相同
+      if (screenBLastRemaining !== screenRemaining || screenBLastRemaining === 0) {
+        screenBLastUpdateTime = now
+        screenBLastRemaining = screenRemaining
+      }
+
+      const elapsed = (now - screenBLastUpdateTime) / 1000
+      const newRemaining = Math.max(0, screenBLastRemaining - elapsed)
+      return Math.round(newRemaining * 10) / 10
+    }
+  }
+
   // 获取显示用的剩余时间 - 用于前端实时显示
   const getDisplayRemaining = () => {
     if (timerState.status === 'running' && timerState.localDisplayRemaining > 0) {
@@ -508,6 +553,7 @@ export function useEnhancedTimerStore() {
 
     // 显示相关方法
     getDisplayRemaining,
+    getCurrentScreenRemainingWithLocalCountdown,
     cleanup
   }
 }

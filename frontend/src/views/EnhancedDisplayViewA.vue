@@ -41,7 +41,8 @@
           <div class="time-display">
             <!-- AB交替模式下显示当前屏幕的剩余时间 -->
             <template v-if="timerState.abMode === 'alternate'">
-              <div class="time-value">{{ formatAbTime(currentScreenRemaining) }}</div>
+              <!-- ✅ 修复：使用本地实时倒计时而不是离散的秒数值 -->
+              <div class="time-value">{{ formatAbTime(timerStore.getCurrentScreenRemainingWithLocalCountdown('A')) }}</div>
               <div class="time-label">A屏剩余时间</div>
             </template>
             <template v-else>
