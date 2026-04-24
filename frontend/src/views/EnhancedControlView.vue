@@ -630,13 +630,11 @@ const fetchEnhancedMatchTypes = async () => {
 const loadMatchTypeConfig = (matchType) => {
   if (!matchType) return
 
-  // 设置时间配置
+  // ✅ 严格遵循"后端单一数据源"原则
+  // 更新本地输入框的值（这些是UI控件）
   preparationTime.value = matchType.preparationTime || 10
   competitionTime.value = matchType.competitionTime || 180
   yellowLightTime.value = matchType.yellowLightTime || 30
-
-  // ✅ 立即同步到预览，确保初始化时显示正确的倒计时
-  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
 
   // 设置AB屏模式
   screenMode.value = matchType.defaultScreenMode || 'alternate'
@@ -650,10 +648,16 @@ const loadMatchTypeConfig = (matchType) => {
   updatePrompt('B', bPrompt.value)
   handleScreenModeChange(screenMode.value)
 
-  // 选择比赛类型
+  // 选择比赛类型，后端会返回完整状态（包括计算的currentStageRemaining）
   if (timerStore.connectionState.isConnected) {
     timerStore.selectMatchType(matchType.id)
-    updateTimeConfig()
+    // ✅ 发送时间配置给后端，让后端计算并广播
+    const config = {
+      preparation: preparationTime.value,
+      competition: competitionTime.value,
+      yellowLight: yellowLightTime.value
+    }
+    timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
   }
 }
 
@@ -709,47 +713,46 @@ const resetABScreenState = () => {
 const updateTimeConfig = () => {
   if (!timerStore.connectionState.isConnected) return
 
-  // ✅ 立即同步到预览（用户点击按钮时）
-  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
-
+  // ✅ 严格遵循"后端单一数据源"原则
+  // 步骤1：发送原始用户输入给后端（无任何计算）
   const config = {
     preparation: preparationTime.value,
     competition: competitionTime.value,
     yellowLight: yellowLightTime.value
   }
 
-  // 通过WebSocket发送时间配置更新
+  logService.debug('发送时间配置给后端（原始值）', config)
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
-  // 重置AB屏和控制按钮到初始状态
+  // 步骤2：等待后端处理并广播完整状态
+  // 后端会计算 currentStageRemaining 并发送回来
+  // 前端会在 WebSocket 消息处理器中无条件接收和更新
+
   resetABScreenState()
 }
 
 const onTimeConfigBlur = () => {
-  // ✅ 失焦时同步预览显示
-  // 确保输入框失焦后立即更新预览界面的倒计时显示
+  // ✅ 失焦时同步到后端
+  // 用户编辑完毕，发送配置给后端进行处理和验证
   if (!timerStore.connectionState.isConnected) {
     logService.warn('未连接到服务器，无法同步时间配置')
     return
   }
 
-  // 立即同步到预览（本地状态，无需等待服务器响应）
-  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
-
+  // 原始用户输入（不做任何计算）
   const config = {
     preparation: preparationTime.value,
     competition: competitionTime.value,
     yellowLight: yellowLightTime.value
   }
 
-  // 通过WebSocket发送时间配置更新到服务器
+  logService.debug('失焦时发送时间配置给后端', config)
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
-  logService.debug('时间配置已失焦，预览已同步', {
-    preparation: preparationTime.value,
-    competition: competitionTime.value,
-    yellowLight: yellowLightTime.value
-  })
+  // ✅ 不调用 syncTimeConfigToPreview
+  // 原因：不在前端做任何计算，完全等待后端广播
+  // 后端会计算并广播：{preparationTime, competitionTime, yellowLightTime, currentStageRemaining, ...}
+  // 前端接收到 WebSocket 消息后会无条件更新所有字段
 }
 
 const updatePrompt = (screen, prompt) => {

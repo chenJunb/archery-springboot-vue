@@ -150,29 +150,19 @@ function initMessageListeners() {
       case 'timer_state':
         logService.debug('📥 收到计时器状态更新')
 
-        // ✅ 保护用户正在编辑的字段 - 防止WebSocket状态覆盖用户输入
-        const protectedFields = [
-          'aPrompt',              // A屏提示
-          'bPrompt',              // B屏提示
-          'preparationTime',      // 准备时间
-          'competitionTime',      // 比赛时间
-          'yellowLightTime'       // 黄灯时间
-        ]
+        // ✅ "后端单一数据源"原则：无条件接收后端状态
+        // 前端不应该"保护"任何字段以阻止后端更新
+        // 如果后端有新的配置值，应该立即应用（这意味着配置已被验证和处理）
 
-        // ✅ CRITICAL: 必须在覆盖之前备份受保护的字段
-        const backup = {}
-        protectedFields.forEach(field => {
-          backup[field] = timerState[field]
-        })
-        logService.debug('📋 已备份受保护字段', { backup })
-
-        // ✅ 合并服务器状态到timerState（会暂时覆盖所有字段）
+        // ✅ 合并服务器状态到timerState（完全信任后端）
         Object.assign(timerState, data)
 
-        // ✅ 立即恢复受保护的字段（用户正在编辑的值）
-        // 这样即使服务器发送了这些字段，也不会覆盖用户的本地输入
-        Object.assign(timerState, backup)
-        logService.debug('✅ 已恢复受保护字段')
+        logService.debug('✅ 已应用后端状态（包括所有时间配置）', {
+          preparationTime: timerState.preparationTime,
+          competitionTime: timerState.competitionTime,
+          yellowLightTime: timerState.yellowLightTime,
+          currentStageRemaining: timerState.currentStageRemaining
+        })
 
         // 同步本地计时 - 更新基准时间和剩余时间
         lastWebSocketUpdateTime = Date.now()
@@ -410,24 +400,26 @@ export function useEnhancedTimerStore() {
     sendGlobalWebSocketMessage('timer/manual-buzzer', { type })
   }
 
-  // 同步时间配置到预览（内部方法，用于立即更新预览显示）
+  // 同步时间配置到预览（内部方法，仅更新配置字段，不计算任何值）
   const syncTimeConfigToPreview = (prep, comp, yellow) => {
-    // 直接更新内部状态中的时间配置字段（不经过readonly）
-    timerState.preparationTime = prep || 10
-    timerState.competitionTime = comp || 180
-    timerState.yellowLightTime = yellow || 30
+    // ✅ 严格遵循"后端单一数据源"原则
+    // 仅更新用户输入的配置字段，不进行任何计算
+    // 所有计算值（如currentStageRemaining）由后端计算并广播
 
-    // 更新currentStageRemaining为新的初始配置值
-    // 预览在非运行状态下显示的就是 currentStageRemaining
-    const totalSeconds = (prep || 10) + (comp || 180)
-    timerState.currentStageRemaining = totalSeconds
-    timerState.localDisplayRemaining = totalSeconds
+    timerState.preparationTime = prep
+    timerState.competitionTime = comp
+    timerState.yellowLightTime = yellow
 
-    logService.debug('预览时间配置已同步', {
+    // ✅ 不计算 currentStageRemaining，等待后端广播
+    // ❌ 移除：const totalSeconds = (prep || 10) + (comp || 180)
+    // ❌ 移除：timerState.currentStageRemaining = totalSeconds
+    // ❌ 移除：timerState.localDisplayRemaining = totalSeconds
+
+    logService.debug('已同步时间配置字段（不计算任何值）', {
       preparation: timerState.preparationTime,
       competition: timerState.competitionTime,
       yellowLight: timerState.yellowLightTime,
-      currentStageRemaining: timerState.currentStageRemaining
+      note: '计算值将由后端广播更新'
     })
   }
 
