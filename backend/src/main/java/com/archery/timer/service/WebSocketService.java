@@ -22,10 +22,12 @@ public class WebSocketService {
     @Value("${archery.timer.websocket-timeout:86400000}")
     private long websocketTimeout = 86400000L; // 24小时
 
-    @Value("${archery.timer.control-heartbeat-timeout:30000}")
-    private long controlHeartbeatTimeout = 30000L; // 30秒
+    @Value("${archery.timer.control-heartbeat-timeout:60000}")
+    private long controlHeartbeatTimeout = 60000L; // ✅ 改为60秒（从30秒）
 
     private final Map<String, ClientInfo> clients = new ConcurrentHashMap<>();
+    // ✅ 修复8.1: 添加sessionId -> clientId映射，用于断开连接时查询
+    private final Map<String, String> sessionIdToClientId = new ConcurrentHashMap<>();
     private ScheduledExecutorService cleanupScheduler;
     private String currentControlClientId = null;
     private long lastControlHeartbeat = 0;
@@ -53,13 +55,28 @@ public class WebSocketService {
 
     /**
      * 注册客户端
+     * ✅ 改进：检查是否已存在，避免重复创建新对象
      */
     public synchronized void registerClient(String clientId, String clientType, String clientName) {
+        // ✅ 检查是否已存在
+        ClientInfo existingClient = clients.get(clientId);
+        if (existingClient != null) {
+            log.info("客户端已注册，更新信息: {}", clientId);
+            // 只更新需要更新的字段，保留原有的registeredAt
+            existingClient.setClientType(clientType);
+            existingClient.setClientName(clientName);
+            existingClient.setLastHeartbeat(LocalDateTime.now());
+            existingClient.setStatus("connected");
+            updateConnectedClients();
+            return;  // ← 重要：直接返回，不覆盖原对象
+        }
+
+        // ✅ 新客户端：创建新对象
         ClientInfo client = new ClientInfo();
         client.setClientId(clientId);
         client.setClientType(clientType);
         client.setClientName(clientName);
-        client.setRegisteredAt(LocalDateTime.now());
+        client.setRegisteredAt(LocalDateTime.now());  // ← 只在新注册时设置
         client.setLastHeartbeat(LocalDateTime.now());
         client.setStatus("connected");
 
@@ -75,17 +92,38 @@ public class WebSocketService {
         // 更新连接客户端列表
         updateConnectedClients();
 
-        log.info("客户端注册成功 - ID: {}, 类型: {}, 名称: {}", clientId, clientType, clientName);
+        log.info("新客户端注册成功 - ID: {}, 类型: {}, 名称: {}", clientId, clientType, clientName);
         log.info("当前连接客户端数: {}", clients.size());
     }
 
     /**
+     * 注册会话到客户端的映射
+     * ✅ 修复8.1: 提供sessionId -> clientId映射
+     */
+    public synchronized void registerSessionIdMapping(String sessionId, String clientId) {
+        sessionIdToClientId.put(sessionId, clientId);
+        log.debug("映射会话到客户端 - 会话ID: {}, 客户端ID: {}", sessionId, clientId);
+    }
+
+    /**
+     * 根据会话ID获取客户端ID
+     * ✅ 修复8.1: 获取与会话关联的客户端
+     */
+    public String getClientIdBySessionId(String sessionId) {
+        return sessionIdToClientId.get(sessionId);
+    }
+
+    /**
      * 注销客户端
+     * ✅ 改进8.1: 同时清理sessionId映射
      */
     public synchronized void unregisterClient(String clientId) {
         ClientInfo client = clients.remove(clientId);
         if (client != null) {
             log.info("客户端注销 - ID: {}, 类型: {}", clientId, client.getClientType());
+
+            // ✅ 清理sessionId映射
+            sessionIdToClientId.values().removeIf(value -> value.equals(clientId));
 
             // 如果是控制端，需要重新选择控制端
             if (clientId.equals(currentControlClientId)) {
@@ -156,13 +194,17 @@ public class WebSocketService {
 
     /**
      * 选择新的控制端
+     * ✅ 改进：创建副本列表，避免ConcurrentModificationException
      */
     private synchronized void selectNewControlClient() {
         currentControlClientId = null;
 
+        // ✅ 创建副本列表，避免迭代时的并发修改异常
+        List<ClientInfo> clientsCopy = new ArrayList<>(clients.values());
+
         // 查找第一个控制端
-        for (ClientInfo client : clients.values()) {
-            if ("control".equals(client.getClientType())) {
+        for (ClientInfo client : clientsCopy) {
+            if (client != null && "control".equals(client.getClientType())) {
                 currentControlClientId = client.getClientId();
                 lastControlHeartbeat = System.currentTimeMillis();
                 log.info("自动选择新的控制端: {}", currentControlClientId);
@@ -192,13 +234,21 @@ public class WebSocketService {
 
     /**
      * 清理空闲客户端
+     * ✅ 改进：创建副本列表，避免并发修改异常
      */
     private synchronized void cleanupIdleClients() {
         LocalDateTime now = LocalDateTime.now();
         List<String> toRemove = new ArrayList<>();
 
-        for (Map.Entry<String, ClientInfo> entry : clients.entrySet()) {
+        // ✅ 创建副本列表，避免迭代时的并发修改异常
+        List<Map.Entry<String, ClientInfo>> entriesCopy = new ArrayList<>(clients.entrySet());
+
+        for (Map.Entry<String, ClientInfo> entry : entriesCopy) {
             ClientInfo client = entry.getValue();
+            if (client == null) {
+                continue;  // ✅ 防护：客户端为null
+            }
+
             long lastActivityMinutes = java.time.Duration.between(client.getLastHeartbeat(), now).toMinutes();
 
             // 检查超时（24小时）

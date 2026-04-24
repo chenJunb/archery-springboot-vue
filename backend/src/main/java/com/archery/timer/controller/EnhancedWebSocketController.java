@@ -12,11 +12,14 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.annotation.SubscribeMapping;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Controller;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Controller
 @RequiredArgsConstructor
@@ -47,6 +50,60 @@ public class EnhancedWebSocketController {
             log.error("❌ 获取计时器状态失败", e);
             // 返回默认状态而不是让异常传播
             return new TimerStateDTO();
+        }
+    }
+
+    /**
+     * 注册客户端
+     * ✅ 修复8.1: 建立sessionId -> clientId映射
+     */
+    @MessageMapping("/register")
+    public void registerClient(Map<String, Object> payload, org.springframework.messaging.Message<?> message) {
+        SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(message);
+        String sessionId = headerAccessor.getSessionId();
+        String clientType = (String) payload.get("clientType");
+        String clientName = (String) payload.get("clientName");
+
+        // ✅ 生成clientId
+        String clientId = UUID.randomUUID().toString();
+
+        try {
+            // ✅ 注册会话映射
+            webSocketService.registerSessionIdMapping(sessionId, clientId);
+            // ✅ 注册客户端
+            webSocketService.registerClient(clientId, clientType, clientName);
+
+            log.info("✅ 客户端注册成功 - sessionId: {}, clientId: {}, type: {}, name: {}",
+                sessionId, clientId, clientType, clientName);
+
+            // 记录客户端连接日志
+            logFileManager.logWebSocketConnection(sessionId, clientId, "REGISTERED",
+                "客户端已注册 - 类型: " + clientType + ", 名称: " + clientName);
+
+            // 发送注册成功消息给客户端
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("clientId", clientId);
+            response.put("message", "客户端注册成功");
+
+            messagingTemplate.convertAndSendToUser(sessionId, "/queue/messages",
+                Map.of("type", "client_registered", "data", response));
+        } catch (Exception e) {
+            log.error("❌ 客户端注册失败 - sessionId: {}", sessionId, e);
+            logFileManager.logError(sessionId, "system", "CLIENT_REGISTER",
+                "客户端注册失败: " + e.getMessage(), null);
+
+            // 发送错误消息给客户端
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("success", false);
+            errorResponse.put("message", "客户端注册失败: " + e.getMessage());
+
+            try {
+                messagingTemplate.convertAndSendToUser(sessionId, "/queue/messages",
+                    Map.of("type", "error", "data", errorResponse));
+            } catch (Exception ex) {
+                log.error("❌ 发送错误消息失败", ex);
+            }
         }
     }
 

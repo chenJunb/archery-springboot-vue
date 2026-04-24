@@ -25,6 +25,10 @@ public class WebSocketEventListener {
     private final SimpMessagingTemplate messagingTemplate;
     private final LogFileManager logFileManager;
 
+    /**
+     * 处理WebSocket连接建立
+     * ✅ 改进：记录sessionId，但不立即注册客户端
+     */
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
         SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
@@ -38,8 +42,15 @@ public class WebSocketEventListener {
         // 记录WebSocket连接日志
         logFileManager.logWebSocketConnection(sessionId, "unknown", "CONNECTED",
             "WebSocket连接建立，用户代理: " + headerAccessor.getNativeHeader("user-agent"));
+
+        // ✅ 注释：真正的客户端注册会在客户端发送 /app/register 消息时进行
+        // 这里只是记录连接建立，实际的clientId由客户端提供
     }
 
+    /**
+     * 处理WebSocket断开连接
+     * ✅ 改进8.1: 使用正确的sessionId->clientId映射，只卸载相关客户端
+     */
     @EventListener
     public void handleWebSocketDisconnectListener(SessionDisconnectEvent event) {
         SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
@@ -48,19 +59,26 @@ public class WebSocketEventListener {
         log.info("❌ WebSocket连接断开 - Session ID: {}", sessionId);
         log.debug("断开原因 - 代码: {}", event.getCloseStatus());
 
-        // 从WebSocket服务中移除客户端
-        WebSocketService.ClientInfo clientInfo = webSocketService.getClientInfo(sessionId);
-        if (clientInfo != null) {
-            log.info("移除客户端 - Type: {}, Name: {}", clientInfo.getClientType(), clientInfo.getClientName());
+        // ✅ 修复8.1: 使用sessionId -> clientId映射，只卸载相关客户端
+        String clientId = webSocketService.getClientIdBySessionId(sessionId);
+        if (clientId != null) {
+            try {
+                webSocketService.unregisterClient(clientId);
+                log.info("✅ 已注销客户端 - ID: {}", clientId);
+            } catch (Exception e) {
+                log.error("❌ 注销客户端失败 - ID: {}", clientId, e);
+            }
+        } else {
+            log.debug("⚠️ 未找到与会话关联的客户端 - Session ID: {}", sessionId);
         }
 
-        webSocketService.unregisterClient(sessionId);
-
-        // 广播客户端断开连接
-        broadcastClientStatus(sessionId, "disconnected");
+        // 广播客户端断开连接事件
+        if (clientId != null) {
+            broadcastClientStatus(clientId, "disconnected");
+        }
 
         // 记录WebSocket断开日志
-        logFileManager.logWebSocketConnection(sessionId, "unknown", "DISCONNECTED",
+        logFileManager.logWebSocketConnection(sessionId, clientId != null ? clientId : "unknown", "DISCONNECTED",
             "WebSocket连接断开，断开代码: " + event.getCloseStatus());
     }
 
