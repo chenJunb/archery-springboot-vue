@@ -712,6 +712,9 @@ const updateTimeConfig = () => {
   // 通过WebSocket发送时间配置更新
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
+  // 重置计时器以使用新的配置
+  timerStore.resetTimer()
+
   // 重置AB屏和控制按钮到初始状态
   resetABScreenState()
 }
