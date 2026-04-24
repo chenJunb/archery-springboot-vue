@@ -706,6 +706,9 @@ const resetABScreenState = () => {
 const updateTimeConfig = () => {
   if (!timerStore.connectionState.isConnected) return
 
+  // ✅ 立即同步到预览（用户点击按钮时）
+  timerStore.syncTimeConfigToPreview(preparationTime.value, competitionTime.value, yellowLightTime.value)
+
   const config = {
     preparation: preparationTime.value,
     competition: competitionTime.value,
@@ -714,9 +717,6 @@ const updateTimeConfig = () => {
 
   // 通过WebSocket发送时间配置更新
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
-
-  // 重置计时器以使用新的配置
-  timerStore.resetTimer()
 
   // 重置AB屏和控制按钮到初始状态
   resetABScreenState()
@@ -845,7 +845,7 @@ const formatServerTime = (timestamp) => {
 }
 
 // 监听timerState的变化
-// ✅ 修复9.1: 移除deep: true，优化性能。timerState本身已是reactive，不需要深度监听
+// ✅ 修复：防止服务器状态覆盖用户最新编辑的时间配置
 watch(() => timerState, (newState) => {
   // 更新本地状态以匹配服务器状态
   soundEnabled.value = newState.soundEnabled
@@ -863,19 +863,12 @@ watch(() => timerState, (newState) => {
     screenMode.value = newState.abMode
   }
 
-  // 更新时间配置
-  if (newState.preparationTime !== undefined && newState.preparationTime !== preparationTime.value) {
-    preparationTime.value = newState.preparationTime
-  }
+  // ✅ 不同步时间配置回本地变量
+  // 原因：用户修改的本地变量应该驱动timerState，而不是反过来
+  // 如果允许timerState反向更新本地变量，服务器返回的旧值会覆盖用户的修改
+  // 预览显示由 timerState 驱动，但用户输入框保持用户最新输入的值
+}, { immediate: false })
 
-  if (newState.competitionTime !== undefined && newState.competitionTime !== competitionTime.value) {
-    competitionTime.value = newState.competitionTime
-  }
-
-  if (newState.yellowLightTime !== undefined && newState.yellowLightTime !== yellowLightTime.value) {
-    yellowLightTime.value = newState.yellowLightTime
-  }
-})
 
 // 生命周期
 onMounted(() => {
