@@ -829,6 +829,7 @@ const formatServerTime = (timestamp) => {
 }
 
 // 监听timerState的变化
+// ✅ 修复9.1: 移除deep: true，优化性能。timerState本身已是reactive，不需要深度监听
 watch(() => timerState, (newState) => {
   // 更新本地状态以匹配服务器状态
   soundEnabled.value = newState.soundEnabled
@@ -858,7 +859,7 @@ watch(() => timerState, (newState) => {
   if (newState.yellowLightTime !== undefined && newState.yellowLightTime !== yellowLightTime.value) {
     yellowLightTime.value = newState.yellowLightTime
   }
-}, { deep: true })
+})
 
 // 生命周期
 onMounted(() => {

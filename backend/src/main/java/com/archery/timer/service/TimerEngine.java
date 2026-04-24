@@ -139,17 +139,21 @@ public class TimerEngine {
         }
 
         // 初始化AB交替模式的屏幕计时器
+        // 规则: 绿灯初始状态 - A屏开始倒计时，B屏暂停在初始时间
         if ("alternate".equals(this.currentState.getAbMode()) && currentState.getCompetitionTime() != null) {
-            // 绿灯初始状态：A屏开始倒计时，B屏暂停在绿灯的初始配置时间上
+            // 两个屏幕都从竞赛时间开始
             this.screenATimerRemaining = currentState.getCompetitionTime();
             this.screenBTimerRemaining = currentState.getCompetitionTime();
-            this.screenATimerPausedAt = 0; // A屏正在运行
-            this.screenBTimerPausedAt = System.currentTimeMillis(); // B屏立刻暂停
+
+            // A屏正在运行，B屏暂停
+            this.screenATimerPausedAt = 0;      // A屏: 0 表示正在运行
+            this.screenBTimerPausedAt = System.currentTimeMillis(); // B屏: 非0表示已暂停
 
             this.currentScreenStatus = "A";
             this.isFirstSwitch = true;
+            this.isAScreenActive = true;
 
-            log.info("初始化AB交替模式 - A屏从 {} 秒开始倒计时，B屏暂停保持在 {} 秒",
+            log.info("AB交替模式初始化 - A屏从{}秒开始倒计时，B屏暂停在{}秒",
                 screenATimerRemaining, screenBTimerRemaining);
         }
 
@@ -178,11 +182,15 @@ public class TimerEngine {
         currentState.setStatus("running");
         currentState.setControlClientId(controlClientId);
 
+        // ✅ 改进：原子地设置时间基准，防止并发更新导致的不一致
         if (lastUpdateAt == 0 || isTimerPaused) {
             // 首次启动或从暂停恢复
-            timerStartedAt = System.currentTimeMillis();
-            lastUpdateAt = timerStartedAt;
+            // ✅ 使用临时变量确保两个值的一致性
+            long now = System.currentTimeMillis();
+            timerStartedAt = now;
+            lastUpdateAt = now;
             screenElapsedAtSwitch = 0;
+            log.debug("✅ 时间基准已重置 - timerStartedAt: {}, lastUpdateAt: {}", timerStartedAt, lastUpdateAt);
         }
 
         // AB交替模式：记录切换时间
@@ -246,6 +254,8 @@ public class TimerEngine {
                 MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
                 currentState.setCurrentStageElapsed(0);
                 currentState.setCurrentStageRemaining(firstStage.getDuration());
+                // ✅ 修复1.13: 重置舞台颜色到第一个舞台的颜色
+                currentState.setCurrentStageColor(firstStage.getColor());
             }
         }
 
@@ -324,112 +334,110 @@ public class TimerEngine {
     /**
      * 切换AB屏（实现详细的个人赛和团队赛规则）
      */
+    /**
+     * AB屏幕切换 - 遵循AB交替模式规则
+     * ✅ 改进：添加多层防护，防止空指针异常
+     *
+     * 规则说明:
+     * 1. 准备阶段(红灯): AB屏强制同步倒计时
+     * 2. 绿灯初始状态: A屏开始倒计时，B屏暂停在初始时间
+     * 3. 个人赛切换: 原屏清零，新屏从初始时间重新开始
+     * 4. 团队赛切换: 原屏暂停保留时间，新屏继续倒计时
+     */
     public synchronized void toggleABScreen() {
+        // ✅ 第一层检查：模式检查
         if (!"alternate".equals(currentState.getAbMode())) {
             log.warn("只有AB交替模式可以切换屏幕");
             return;
         }
 
+        // ✅ 第二层检查：运行状态和比赛类型检查
+        if (!isTimerRunning) {
+            log.warn("计时器未运行，无法切换屏幕");
+            return;
+        }
+
         if (currentEnhancedMatchType == null) {
-            log.warn("请先选择比赛类型");
+            log.error("❌ 未选择比赛类型，无法切换屏幕");
+            return;
+        }
+
+        // ✅ 第三层检查：活跃屏幕检查
+        String currentScreen = currentState.getActiveScreen();
+        if (currentScreen == null || currentScreen.isEmpty()) {
+            log.error("❌ 活跃屏幕信息丢失，无法切换屏幕");
             return;
         }
 
         long now = System.currentTimeMillis();
-        String newScreen = "A".equals(currentState.getActiveScreen()) ? "B" : "A";
-        String oldScreen = currentState.getActiveScreen();
+        String newScreen = "A".equals(currentScreen) ? "B" : "A";
 
-        log.info("准备切换AB屏: {} -> {}", oldScreen, newScreen);
+        log.info("AB屏切换规则执行: {} -> {}", currentScreen, newScreen);
 
-        // 根据比赛类型应用不同的切换规则
+        // 1. 保存当前屏幕的剩余时间
+        if ("A".equals(currentScreen)) {
+            screenATimerRemaining = calculateRemainingTimeForScreen("A", now);
+            log.debug("保存A屏剩余时间: {}秒", screenATimerRemaining);
+        } else {
+            screenBTimerRemaining = calculateRemainingTimeForScreen("B", now);
+            log.debug("保存B屏剩余时间: {}秒", screenBTimerRemaining);
+        }
+
+        // ✅ 第四层检查：比赛类型信息检查
         String category = currentEnhancedMatchType.getCategory();
         String alternateType = currentEnhancedMatchType.getAlternateType();
 
-        // 保存切换前的状态
-        if ("A".equals(oldScreen)) {
-            if (screenATimerPausedAt == 0) {
-                // A屏正在运行，记录已运行的时间
-                screenATimerRemaining = calculateRemainingTimeForScreen("A", now);
+        if (category == null || category.isEmpty()) {
+            log.error("❌ 比赛类型分类信息丢失，无法切换屏幕");
+            return;
+        }
+
+        boolean isIndividual = "individual".equals(category) || "individual_alternate".equals(alternateType);
+
+        // 3. 应用切换规则
+        if (isIndividual) {
+            // 个人赛规则: 原屏清零，新屏从初始时间重新开始
+            if ("A".equals(newScreen)) {
+                // 切换到A屏
+                screenBTimerRemaining = 0;            // 原B屏清零
+                screenBTimerPausedAt = now;           // B屏暂停
+                screenATimerRemaining = currentState.getCompetitionTime(); // A屏重新开始
+                screenATimerPausedAt = 0;             // A屏运行
+                log.info("个人赛切换: B屏清零(0秒)，A屏重新开始({}秒)",
+                    currentState.getCompetitionTime());
+            } else {
+                // 切换到B屏
+                screenATimerRemaining = 0;            // 原A屏清零
+                screenATimerPausedAt = now;           // A屏暂停
+                screenBTimerRemaining = currentState.getCompetitionTime(); // B屏重新开始
+                screenBTimerPausedAt = 0;             // B屏运行
+                log.info("个人赛切换: A屏清零(0秒)，B屏重新开始({}秒)",
+                    currentState.getCompetitionTime());
             }
-            screenATimerPausedAt = now;
         } else {
-            if (screenBTimerPausedAt == 0) {
-                // B屏正在运行，记录已运行的时间
-                screenBTimerRemaining = calculateRemainingTimeForScreen("B", now);
+            // 团队赛/混团规则: 原屏暂停保留时间，新屏继续倒计时
+            if ("A".equals(newScreen)) {
+                // 切换到A屏
+                screenATimerPausedAt = 0;             // A屏继续运行
+                screenBTimerPausedAt = now;           // B屏暂停
+                log.info("团队赛切换: B屏暂停(剩余{}秒)，A屏继续计时",
+                    screenBTimerRemaining);
+            } else {
+                // 切换到B屏
+                screenBTimerPausedAt = 0;             // B屏继续运行
+                screenATimerPausedAt = now;           // A屏暂停
+                log.info("团队赛切换: A屏暂停(剩余{}秒)，B屏继续计时",
+                    screenATimerRemaining);
             }
-            screenBTimerPausedAt = now;
         }
 
-        // 应用切换规则
-        if ("individual".equals(category) || "individual_alternate".equals(alternateType)) {
-            // 个人赛规则：切换时原屏清零，新屏从绿灯初始时间重新开始
-            if ("A".equals(newScreen)) {
-                // 切换到A屏：原B屏清零，A屏从绿灯初始时间开始
-                screenBTimerRemaining = 0;
-                if (screenATimerPausedAt != 0 && !isFirstSwitch) {
-                    // 如果不是首次切换，从暂停状态继续
-                    long pausedDuration = now - screenATimerPausedAt;
-                    screenATimerRemaining = Math.max(0, screenATimerRemaining);
-                } else {
-                    // 首次切换，从初始时间开始
-                    screenATimerRemaining = currentState.getCompetitionTime() != null ?
-                        currentState.getCompetitionTime() : 0;
-                }
-                screenATimerPausedAt = 0; // 恢复A屏
-            } else {
-                // 切换到B屏：原A屏清零，B屏从绿灯初始时间开始
-                screenATimerRemaining = 0;
-                if (screenBTimerPausedAt != 0 && !isFirstSwitch) {
-                    // 如果不是首次切换，从暂停状态继续
-                    long pausedDuration = now - screenBTimerPausedAt;
-                    screenBTimerRemaining = Math.max(0, screenBTimerRemaining);
-                } else {
-                    // 首次切换，从初始时间开始
-                    screenBTimerRemaining = currentState.getCompetitionTime() != null ?
-                        currentState.getCompetitionTime() : 0;
-                }
-                screenBTimerPausedAt = 0; // 恢复B屏
-            }
-            log.info("应用个人赛切换规则: 原屏{}清零，新屏{}从{}秒开始",
-                oldScreen, newScreen, "A".equals(newScreen) ? screenATimerRemaining : screenBTimerRemaining);
-
-        } else if ("team".equals(category) || "mixed_team".equals(category) ||
-                   "team_alternate".equals(alternateType) || "mixed_team_alternate".equals(alternateType)) {
-            // 团队赛/混团规则：原屏暂停保留时间，新屏继续
-            if ("A".equals(newScreen)) {
-                // 切换到A屏：A屏继续计时（从暂停位置继续）
-                screenATimerPausedAt = 0; // 恢复A屏
-                // B屏保持暂停状态不变
-                if (screenBTimerPausedAt == 0) {
-                    // 如果B屏之前正在运行，切换到暂停状态
-                    screenBTimerRemaining = calculateRemainingTimeForScreen("B", now);
-                    screenBTimerPausedAt = now;
-                }
-            } else {
-                // 切换到B屏：B屏继续计时（从暂停位置继续）
-                screenBTimerPausedAt = 0; // 恢复B屏
-                // A屏保持暂停状态不变
-                if (screenATimerPausedAt == 0) {
-                    // 如果A屏之前正在运行，切换到暂停状态
-                    screenATimerRemaining = calculateRemainingTimeForScreen("A", now);
-                    screenATimerPausedAt = now;
-                }
-            }
-            log.info("应用团队赛切换规则: 原屏{}暂停保留{}秒，新屏{}继续计时",
-                oldScreen,
-                "A".equals(oldScreen) ? screenATimerRemaining : screenBTimerRemaining,
-                newScreen);
-        }
-
-        // 更新当前活动屏幕状态
+        // 4. 更新当前活动屏幕
         currentState.setActiveScreen(newScreen);
         isAScreenActive = "A".equals(newScreen);
         screenElapsedAtSwitch = now;
-        currentScreenStatus = newScreen;
-        isFirstSwitch = false;
 
-        log.info("切换AB屏完成: {} -> {} (A剩余:{}s, B剩余:{}s)",
-            oldScreen, newScreen, screenATimerRemaining, screenBTimerRemaining);
+        log.info("屏幕切换完成 => 当前活动屏幕: {}, A剩余: {}秒, B剩余: {}秒",
+            newScreen, screenATimerRemaining, screenBTimerRemaining);
 
         notifyStateChange();
     }
@@ -460,9 +468,20 @@ public class TimerEngine {
         long elapsedSinceLast = now - lastUpdateAt;
         long totalElapsed = now - timerStartedAt;
 
-        // 计算总时间和剩余时间
-        int totalElapsedSeconds = (int) (totalElapsed / 1000);
-        int totalRemainingSeconds = Math.max(0, currentMatchType.getTotalTime() - totalElapsedSeconds);
+        // ✅ 计算总时间和剩余时间 - 防止整数溢出
+        long totalElapsedSeconds = totalElapsed / 1000;
+
+        // ✅ 使用安全转换防止溢出
+        int totalElapsedSecondsInt;
+        try {
+            totalElapsedSecondsInt = Math.toIntExact(totalElapsedSeconds);
+        } catch (ArithmeticException e) {
+            log.error("❌ 整数溢出：总经过时间{}秒超过int范围，重置计时器", totalElapsedSeconds);
+            resetTimer();
+            return;
+        }
+
+        int totalRemainingSeconds = Math.max(0, currentMatchType.getTotalTime() - totalElapsedSecondsInt);
 
         // 检查是否结束
         if (totalRemainingSeconds <= 0) {
@@ -570,26 +589,61 @@ public class TimerEngine {
 
     /**
      * 启动定时任务
+     * ✅ 改进：检查executor状态，避免在已关闭的executor上调度任务
      */
     private void startTimerTask() {
-        stopTimerTask(); // 确保只有一个任务运行
+        stopTimerTask(); // 确保之前的任务已停止
 
-        timerScheduler.scheduleAtFixedRate(() -> {
-            try {
-                updateTimerState();
-            } catch (Exception e) {
-                log.error("定时任务执行异常", e);
-            }
-        }, 0, broadcastInterval, TimeUnit.MILLISECONDS);
+        // ✅ 创建新的executor
+        timerScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "TimerEngine-ScheduledTask");
+            thread.setDaemon(false);
+            return thread;
+        });
+
+        // ✅ 检查executor是否可用
+        if (timerScheduler == null || timerScheduler.isShutdown()) {
+            log.error("❌ 计时器调度器创建失败或已关闭，无法启动定时任务");
+            return;
+        }
+
+        // ✅ 安全地调度任务
+        try {
+            timerScheduler.scheduleAtFixedRate(() -> {
+                try {
+                    updateTimerState();
+                } catch (Exception e) {
+                    log.error("定时任务执行异常", e);
+                }
+            }, 0, broadcastInterval, TimeUnit.MILLISECONDS);
+            log.debug("✅ 定时任务已启动，广播间隔: {}ms", broadcastInterval);
+        } catch (RejectedExecutionException e) {
+            log.error("❌ 计时器调度器已关闭，无法调度任务", e);
+        }
     }
 
     /**
      * 停止定时任务
+     * ✅ 改进：安全地关闭executor，等待任务完成
      */
     private void stopTimerTask() {
-        if (timerScheduler != null) {
-            timerScheduler.shutdownNow();
-            timerScheduler = Executors.newSingleThreadScheduledExecutor();
+        if (timerScheduler != null && !timerScheduler.isShutdown()) {
+            try {
+                // ✅ 停止接收新任务
+                timerScheduler.shutdown();
+
+                // ✅ 等待现有任务完成，最多等待500ms
+                if (!timerScheduler.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                    log.warn("⚠️ 定时任务未在规定时间内完成，执行强制关闭");
+                    timerScheduler.shutdownNow();
+                }
+
+                log.debug("✅ 定时任务已停止");
+            } catch (InterruptedException e) {
+                log.error("❌ 等待定时任务完成时被中断", e);
+                timerScheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
