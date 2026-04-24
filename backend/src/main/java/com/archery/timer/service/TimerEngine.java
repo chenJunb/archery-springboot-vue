@@ -593,7 +593,16 @@ public class TimerEngine {
      * ✅ 改进：检查executor状态，避免在已关闭的executor上调度任务
      */
     private void startTimerTask() {
-        stopTimerTask(); // 确保之前的任务已停止
+        // ✅ 改进：如果scheduler已在运行，直接返回（不需要重新启动）
+        if (timerScheduler != null && !timerScheduler.isShutdown()) {
+            log.debug("⚠️ 定时任务已在运行，跳过重复启动");
+            return;
+        }
+
+        // ✅ 停止旧的scheduler（如果存在）
+        if (timerScheduler != null) {
+            stopTimerTaskNow();
+        }
 
         // ✅ 创建新的executor
         timerScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -624,8 +633,24 @@ public class TimerEngine {
     }
 
     /**
+     * 立即停止定时任务（用于重新启动）
+     * ✅ 新增：立即关闭，不等待任务完成
+     */
+    private void stopTimerTaskNow() {
+        if (timerScheduler != null && !timerScheduler.isShutdown()) {
+            try {
+                log.debug("🔴 立即停止定时任务");
+                timerScheduler.shutdownNow();
+                log.debug("✅ 定时任务已立即停止");
+            } catch (Exception e) {
+                log.error("❌ 立即停止定时任务失败", e);
+            }
+        }
+    }
+
+    /**
      * 停止定时任务
-     * ✅ 改进：安全地关闭executor，等待任务完成
+     * ✅ 改进：优雅地关闭，等待现有任务完成
      */
     private void stopTimerTask() {
         if (timerScheduler != null && !timerScheduler.isShutdown()) {
@@ -633,8 +658,8 @@ public class TimerEngine {
                 // ✅ 停止接收新任务
                 timerScheduler.shutdown();
 
-                // ✅ 等待现有任务完成，最多等待500ms
-                if (!timerScheduler.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                // ✅ 等待现有任务完成，最多等待1秒
+                if (!timerScheduler.awaitTermination(1000, TimeUnit.MILLISECONDS)) {
                     log.warn("⚠️ 定时任务未在规定时间内完成，执行强制关闭");
                     timerScheduler.shutdownNow();
                 }
