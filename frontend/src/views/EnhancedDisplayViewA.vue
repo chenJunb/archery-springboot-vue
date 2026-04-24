@@ -39,16 +39,9 @@
 
           <!-- 倒计时时间 -->
           <div class="time-display">
-            <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-            <template v-if="timerState.abMode === 'alternate'">
-              <!-- ✅ 修复：使用本地实时倒计时而不是离散的秒数值 -->
-              <div class="time-value">{{ formatAbTime(timerStore.getCurrentScreenRemainingWithLocalCountdown('A')) }}</div>
-              <div class="time-label">A屏剩余时间</div>
-            </template>
-            <template v-else>
-              <div class="time-value">{{ formatTime(displayRemaining) }}</div>
-              <div class="time-label">剩余时间</div>
-            </template>
+            <!-- 仅显示纯数字秒数，不做任何时间格式化 -->
+            <div class="time-value">{{ Math.round(timerState.abMode === 'alternate' ? timerStore.getCurrentScreenRemainingWithLocalCountdown('A') : displayRemaining) }}</div>
+            <div class="time-label">剩余秒数</div>
           </div>
 
           <!-- 屏幕状态标签 -->
@@ -67,7 +60,7 @@
             <div class="stage-name" :style="{ color: currentLightColor }">
               {{ timerState.currentStageName || '准备阶段' }}
             </div>
-            <div class="stage-timer">{{ formatTime(displayRemaining) }}</div>
+            <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
           </div>
         </div>
       </div>
@@ -80,7 +73,7 @@
         </div>
         <div class="status-item">
           <el-icon><Timer /></el-icon>
-          <span>总时间: {{ formatTime(timerState.totalRemaining) }}</span>
+          <span>总时间: {{ Math.round(timerState.totalRemaining) }}</span>
         </div>
         <div class="status-item">
           <el-icon><Clock /></el-icon>
@@ -234,27 +227,6 @@ const currentTime = computed(() => {
 })
 
 // 方法
-const formatTime = (seconds) => {
-  // ✅ 修复：统一返回 MM:SS 格式，并确保秒数正确舍入
-  if (seconds == null || seconds < 0) return '00:00'
-  // 转换为整数以避免浮点精度问题
-  const totalSeconds = Math.round(seconds)
-  const mins = Math.floor(totalSeconds / 60)
-  const secs = totalSeconds % 60
-  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-}
-
-const formatAbTime = (seconds) => {
-  // ✅ 修复：AB交替模式下显示完整的时分秒，确保秒数正确舍入
-  if (seconds == null || seconds < 0) return '00:00:00'
-  // 转换为整数以避免浮点精度问题
-  const totalSeconds = Math.round(seconds)
-  const hours = Math.floor(totalSeconds / 3600)
-  const mins = Math.floor((totalSeconds % 3600) / 60)
-  const secs = totalSeconds % 60
-  return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-}
-
 const getControlClientName = () => {
   // 简化的控制端名称获取
   return timerState.controlClientId ? '控制端' : '未知'
