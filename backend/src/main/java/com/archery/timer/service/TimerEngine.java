@@ -68,7 +68,7 @@ public class TimerEngine {
         this.matchTypeConfigService = matchTypeConfigService;
         this.logFileManager = logFileManager;
         this.currentState = TimerStateDTO.idleState();
-        this.timerScheduler = Executors.newSingleThreadScheduledExecutor();
+        this.timerScheduler = null;  // ✅ 修复：不在构造器中创建scheduler，由startTimerTask()创建
 
         // 初始化默认AB屏状态
         this.currentState.setScreenAEnabled(true);
@@ -200,6 +200,9 @@ public class TimerEngine {
         currentState.setStatus("running");
         currentState.setControlClientId(controlClientId);
 
+        // ✅ 修复：在重置时间基准前保存首次启动标记
+        boolean isFirstStart = (lastUpdateAt == 0);
+
         // ✅ 改进：原子地设置时间基准，防止并发更新导致的不一致
         if (lastUpdateAt == 0 || isTimerPaused) {
             // 首次启动或从暂停恢复
@@ -218,9 +221,6 @@ public class TimerEngine {
             }
             screenElapsedAtSwitch = System.currentTimeMillis();
         }
-
-        // ✅ 修复：保存是否为首次启动的标记（在重置时间基准前）
-        boolean isFirstStart = lastUpdateAt == 0;
 
         // 开始定时任务
         startTimerTask();
@@ -518,8 +518,14 @@ public class TimerEngine {
 
         int totalRemainingSeconds = Math.max(0, currentMatchType.getTotalTime() - totalElapsedSecondsInt);
 
+        // ✅ 修复：添加详细日志记录进度
+        log.info("[计时器状态] 经过: {}秒, 剩余: {}秒, 总时间: {}秒, 当前阶段: {} (索引{})",
+                totalElapsedSecondsInt, totalRemainingSeconds, currentMatchType.getTotalTime(),
+                currentState.getCurrentStageName(), currentState.getCurrentStageIndex());
+
         // 检查是否结束
         if (totalRemainingSeconds <= 0) {
+            log.info("⏹️ 计时完全结束 (剩余时间 <= 0)，调用 finishTimer()");
             finishTimer();
             return;
         }
@@ -548,8 +554,10 @@ public class TimerEngine {
 
         lastUpdateAt = now;
 
-        // 通知状态变更
+        // ✅ 修复：确保通知状态变更
+        log.debug("[计时器状态更新] 调用 notifyStateChange()");
         notifyStateChange();
+        log.debug("[计时器状态更新] notifyStateChange() 完成");
     }
 
     /**
