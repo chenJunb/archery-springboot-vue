@@ -219,6 +219,9 @@ public class TimerEngine {
             screenElapsedAtSwitch = System.currentTimeMillis();
         }
 
+        // ✅ 修复：保存是否为首次启动的标记（在重置时间基准前）
+        boolean isFirstStart = lastUpdateAt == 0;
+
         // 开始定时任务
         startTimerTask();
 
@@ -226,9 +229,9 @@ public class TimerEngine {
             currentMatchType.getName() + " | AB模式: " + currentState.getAbMode());
         log.info("开始计时 - 比赛类型: {}, 控制端: {}", currentMatchType.getName(), controlClientId);
 
-        // 触发空闲 -> 准备的鸣笛 (buzz1)
-        if (lastUpdateAt == 0) {
-            // 首次启动，触发准备阶段鸣笛
+        // ✅ 修复：基于首次启动标记触发准备阶段鸣笛 (buzz1)
+        if (isFirstStart) {
+            log.info("🔔 首次启动计时器，触发buzz1鸣笛 - 进入准备阶段");
             triggerBuzzer("buzz1");
         }
 

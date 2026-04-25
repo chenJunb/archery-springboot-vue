@@ -15,6 +15,7 @@ import {
   getGlobalStompClient
 } from '../services/globalWebSocketService'
 import { logService } from '../services/logService'
+import { useBuzzer } from '../composables/useBuzzer'
 
 // 计时器状态（增强版）
 const timerState = reactive({
@@ -679,10 +680,31 @@ export function useEnhancedTimerStore() {
       logService.info('✅ 已订阅 /topic/match-type-details')
     }
 
+    // ✅ 初始化鸣笛composable用于播放声音
+    const buzzer = useBuzzer()
+
     // 订阅鸣笛
     const sub4 = subscribeToTopic('/topic/buzzer', (data) => {
       logService.debug('📢 收到鸣笛通知:', data)
-      // 这里可以播放鸣笛声音
+      // ✅ 修复：根据鸣笛类型播放相应的声音
+      if (data && data.buzzerType) {
+        switch(data.buzzerType) {
+          case 'buzz1':
+            logService.info('🔔 播放1声鸣笛 - 进入准备阶段')
+            buzzer.buzz1()
+            break
+          case 'buzz2':
+            logService.info('🔔 播放2声鸣笛 - 进入比赛阶段')
+            buzzer.buzz2()
+            break
+          case 'buzz3':
+            logService.info('🔔 播放3声鸣笛 - 进入黄灯阶段')
+            buzzer.buzz3()
+            break
+          default:
+            logService.debug('⚠️ 未知的鸣笛类型:', data.buzzerType)
+        }
+      }
     })
     if (sub4) {
       unsubscribeCallbacks.push(sub4)

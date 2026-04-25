@@ -10,7 +10,7 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000, // 固定使用3000端口
+    port: 3003, // 固定使用3000端口
     host: 'localhost',
     strictPort: true, // 如果端口被占用，不自动切换，直接报错
     open: false, // 不自动打开浏览器
