@@ -64,14 +64,59 @@ public class EnhancedWebSocketController {
         String clientType = (String) payload.get("clientType");
         String clientName = (String) payload.get("clientName");
 
-        // ✅ 生成clientId
-        String clientId = UUID.randomUUID().toString();
+        // ✅ 添加详细调试日志
+        log.info("📨 收到客户端注册请求 - sessionId: {}, clientType: {}, clientName: {}",
+            sessionId, clientType, clientName);
+        log.debug("📨 注册请求详情 - sessionId: {}, hasSessionId: {}, messageHeaders: {}",
+            sessionId, sessionId != null, headerAccessor.getMessageHeaders());
+
+        // ✅ 验证sessionId不为空
+        if (sessionId == null || sessionId.isEmpty()) {
+            log.error("❌ 客户端注册失败：sessionId为空");
+            return;
+        }
+
+        // ✅ 关键修复：检查sessionId是否已经注册过客户端
+        String existingClientId = webSocketService.getClientIdBySessionId(sessionId);
+        String clientId;
+
+        if (existingClientId != null) {
+            // 同一个sessionId已经注册过，使用现有的clientId
+            clientId = existingClientId;
+            log.info("🔄 会话已注册 - sessionId: {}, 使用现有clientId: {}", sessionId, clientId);
+        } else {
+            // 新的sessionId，生成新的clientId
+            clientId = UUID.randomUUID().toString();
+            log.info("🆕 新会话注册 - sessionId: {}, 分配新clientId: {}", sessionId, clientId);
+        }
 
         try {
-            // ✅ 注册会话映射
-            webSocketService.registerSessionIdMapping(sessionId, clientId);
-            // ✅ 注册客户端
-            webSocketService.registerClient(clientId, clientType, clientName);
+            // ✅ 关键修复：避免同一个sessionId重复注册导致创建多个client对象
+            boolean alreadyRegistered = false;
+
+            if (existingClientId != null) {
+                // 检查client是否已经存在且活跃
+                var existingClient = webSocketService.getClientInfo(existingClientId);
+                alreadyRegistered = (existingClient != null);
+                log.debug("检查重复注册 - existingClientId: {}, client不为空: {}", existingClientId, alreadyRegistered);
+
+                if (alreadyRegistered) {
+                    // sessionId已经映射到现有客户端，只需更新客户端信息（心跳）
+                    webSocketService.updateHeartbeat(existingClientId);
+                    log.info("🔄 客户端已存在，更新心跳 - clientId: {}, type: {}", existingClientId, clientType);
+                }
+            }
+
+            if (!alreadyRegistered) {
+                // ✅ 注册会话映射
+                webSocketService.registerSessionIdMapping(sessionId, clientId);
+                // ✅ 注册客户端
+                webSocketService.registerClient(clientId, clientType, clientName);
+                log.info("✅ 新客户端注册完成");
+            } else {
+                // 使用已存在的clientId
+                clientId = existingClientId;
+            }
 
             log.info("✅ 客户端注册成功 - sessionId: {}, clientId: {}, type: {}, name: {}",
                 sessionId, clientId, clientType, clientName);
@@ -86,8 +131,45 @@ public class EnhancedWebSocketController {
             response.put("clientId", clientId);
             response.put("message", "客户端注册成功");
 
-            messagingTemplate.convertAndSendToUser(sessionId, "/queue/messages",
-                Map.of("type", "client_registered", "data", response));
+            log.info("📤 发送注册成功响应 - sessionId: {}, clientId: {}, destination: /user/{}/queue/messages",
+                sessionId, clientId, sessionId);
+
+            try {
+                // ✅ 关键调试：记录发送的消息内容
+                Map<String, Object> wsMessage = Map.of("type", "client_registered", "data", response);
+                log.info("📤 发送注册成功消息详情 - 类型: {}, 数据: {}",
+                    "client_registered", response);
+                log.debug("📤 完整消息结构: {}", wsMessage);
+
+                // ✅ 使用直接路径发送（更可靠）
+                String directPath = "/user/" + sessionId + "/queue/messages";
+                messagingTemplate.convertAndSend(directPath, wsMessage);
+                log.info("✅ 注册成功响应已发送 (通过直接路径: {})", directPath);
+
+                // 方法2：发送到/user/queue/messages（全局用户队列）
+                Map<String, Object> globalTestMessage = Map.of(
+                    "type", "client_registered",
+                    "data", response,
+                    "timestamp", System.currentTimeMillis(),
+                    "note", "通过全局用户队列"
+                );
+                messagingTemplate.convertAndSend("/user/queue/messages", globalTestMessage);
+                log.info("✅ 注册消息已发送到全局用户队列");
+
+                // 发送调试消息到 /topic/debug 主题
+                Map<String, Object> debugMessage = Map.of(
+                    "type", "client_registered_debug",
+                    "sessionId", sessionId,
+                    "clientId", clientId,
+                    "timestamp", System.currentTimeMillis(),
+                    "destination", "/user/" + sessionId + "/queue/messages"
+                );
+                messagingTemplate.convertAndSend("/topic/debug", debugMessage);
+                log.debug("🔧 发送调试消息到 /topic/debug: sessionId={}, clientId={}", sessionId, clientId);
+
+            } catch (Exception e) {
+                log.error("❌ 发送注册成功响应失败", e);
+            }
         } catch (Exception e) {
             log.error("❌ 客户端注册失败 - sessionId: {}", sessionId, e);
             logFileManager.logError(sessionId, "system", "CLIENT_REGISTER",
@@ -99,8 +181,10 @@ public class EnhancedWebSocketController {
             errorResponse.put("message", "客户端注册失败: " + e.getMessage());
 
             try {
-                messagingTemplate.convertAndSendToUser(sessionId, "/queue/messages",
+                String directPath = "/user/" + sessionId + "/queue/messages";
+                messagingTemplate.convertAndSend(directPath,
                     Map.of("type", "error", "data", errorResponse));
+                log.info("✅ 错误消息已发送到: {}", directPath);
             } catch (Exception ex) {
                 log.error("❌ 发送错误消息失败", ex);
             }
@@ -116,20 +200,28 @@ public class EnhancedWebSocketController {
         String matchTypeId = (String) payload.get("matchTypeId");
         String clientId = (String) payload.get("clientId");
 
-        log.info("收到选择比赛类型请求: {}, 客户端: {}", matchTypeId, clientId);
+        log.info("📨 收到选择比赛类型请求: matchTypeId={}, clientId={}", matchTypeId, clientId);
 
         // 记录操作日志
         logFileManager.logClientAction(clientId, "control", "SELECT_MATCH_TYPE", matchTypeId);
 
         if (matchTypeId == null) {
-            log.warn("比赛类型ID不能为空");
+            log.warn("⚠️ 比赛类型ID不能为空");
             logFileManager.logError(clientId, "control", "SELECT_MATCH_TYPE",
                 "比赛类型ID不能为空", null);
             return timerEngine.getState();
         }
 
         // 选择比赛类型
+        log.info("📋 调用 timerEngine.selectMatchType({})", matchTypeId);
         timerEngine.selectMatchType(matchTypeId);
+
+        // 验证是否成功设置
+        if (timerEngine.getCurrentState() != null && timerEngine.getCurrentState().getMatchTypeId() != null) {
+            log.info("✅ 比赛类型已成功设置: {}", timerEngine.getCurrentState().getMatchTypeId());
+        } else {
+            log.warn("⚠️ 比赛类型设置可能失败，当前状态: {}", timerEngine.getCurrentState());
+        }
 
         // 获取比赛类型的详细配置并广播
         broadcastMatchTypeDetails(matchTypeId, clientId);
@@ -274,6 +366,12 @@ public class EnhancedWebSocketController {
         // ✅ 获取当前状态但不直接修改
         TimerStateDTO state = timerEngine.getState();
 
+        // ✅ 防护：如果状态为null，返回默认状态
+        if (state == null) {
+            log.warn("⚠️ 计时器状态为null，返回默认状态");
+            return new TimerStateDTO();
+        }
+
         // ✅ 创建一个新的状态副本进行修改
         TimerStateDTO updatedState = new TimerStateDTO();
 
@@ -308,14 +406,61 @@ public class EnhancedWebSocketController {
                 updatedState.setYellowLightTime(state.getYellowLightTime());
             }
 
-            // 重新计算总时间（黄灯是比赛时间的一部分，不单独加入）
+            // 注意：我们不应该在这里计算阶段剩余时间，因为阶段剩余时间取决于当前所处的阶段
+            // 阶段剩余时间应该由TimerEngine根据当前阶段计算
+            // 这里只能设置配置值，不能计算阶段值
+
+            // 关键修复：根据当前状态判断应该设置哪个阶段的时间
+            String currentStage = state.getCurrentStageName();
+            int currentStageRemaining = 0;
+
+            if (currentStage != null && currentStage.contains("准备")) {
+                // 如果是准备阶段，设置准备时间
+                currentStageRemaining = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 10);
+            } else if (currentStage != null && (currentStage.contains("比赛") || currentStage.contains("黄灯"))) {
+                // 如果是比赛阶段或黄灯阶段，设置比赛时间
+                currentStageRemaining = (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 180);
+            } else {
+                // 初始状态或未知状态：根据阶段索引判断
+                // 阶段0=准备，阶段1=比赛（黄灯是比赛阶段的特殊状态）
+                Integer stageIndex = state.getCurrentStageIndex();
+                if (stageIndex != null && stageIndex == 0) {
+                    // 阶段0应该是准备阶段
+                    currentStageRemaining = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 10);
+                } else {
+                    // 其他情况默认为比赛时间
+                    currentStageRemaining = (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 180);
+                }
+            }
+
+            // 重新计算总时间（用于总计时）
             int totalTime = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 0) +
                            (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 0);
+
+            // ✅ 正确设置阶段相关时间字段
             updatedState.setTotalRemaining(totalTime);
+            updatedState.setCurrentStageRemaining(currentStageRemaining);  // ✅ 修复：设置当前阶段的剩余时间
+
+            // 对于AB交替模式，为每个屏幕设置适当的初始时间
+            if (updatedState.getAbMode() != null && updatedState.getAbMode().equals("alternate")) {
+                // 初始状态：A屏从当前阶段剩余时间开始，B屏暂停在同一时间
+                updatedState.setScreenARemaining(currentStageRemaining);
+                updatedState.setScreenBRemaining(currentStageRemaining);
+                updatedState.setScreenAStatus("paused");
+                updatedState.setScreenBStatus("paused");
+                if (currentStage != null && !currentStage.contains("准备")) {
+                    updatedState.setScreenAStatus("running"); // 绿灯阶段A屏开始运行
+                }
+            } else {
+                // 同步模式，所有屏幕相同
+                updatedState.setScreenARemaining(currentStageRemaining);
+                updatedState.setScreenBRemaining(currentStageRemaining);
+            }
 
             // ✅ 广播更新
             messagingTemplate.convertAndSend("/topic/timer-state", updatedState);
-            log.info("✅ 时间配置已更新并广播");
+            log.info("✅ 时间配置已更新并广播 - 总时间: {}s, 当前阶段: {}s, A屏: {}s, B屏: {}s",
+                totalTime, currentStageRemaining, updatedState.getScreenARemaining(), updatedState.getScreenBRemaining());
             return updatedState;
         } catch (Exception e) {
             log.error("设置时间配置失败", e);

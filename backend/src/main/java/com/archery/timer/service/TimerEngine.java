@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.PreDestroy;
@@ -21,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 @Slf4j
-@Service
 public class TimerEngine {
 
     @Setter
@@ -35,6 +35,8 @@ public class TimerEngine {
 
     private final MatchTypeConfigService matchTypeConfigService;
     private final LogFileManager logFileManager;
+    @Setter
+    private SimpMessagingTemplate messagingTemplate;
     private EnhancedMatchTypeDTO currentEnhancedMatchType;
     private MatchTypeDTO currentMatchType;
 
@@ -57,6 +59,10 @@ public class TimerEngine {
 
     // 屏幕状态记录
     private String currentScreenStatus = "A"; // 当前活动屏幕
+
+    // 阶段切换跟踪（用于声音提示）
+    private int previousStageIndex = -1;
+    private boolean wasYellowLight = false;
 
     public TimerEngine(MatchTypeConfigService matchTypeConfigService, LogFileManager logFileManager) {
         this.matchTypeConfigService = matchTypeConfigService;
@@ -139,6 +145,10 @@ public class TimerEngine {
             this.currentState.setCurrentStageRemaining(firstStage.getDuration());
         }
 
+        // 重置阶段切换跟踪
+        previousStageIndex = -1;
+        wasYellowLight = false;
+
         // 初始化AB交替模式的屏幕计时器
         // 规则: 绿灯初始状态 - A屏开始倒计时，B屏暂停在初始时间
         if ("alternate".equals(this.currentState.getAbMode()) && currentState.getCompetitionTime() != null) {
@@ -208,6 +218,13 @@ public class TimerEngine {
         logFileManager.logClientAction(controlClientId, "control", "START_TIMER",
             currentMatchType.getName() + " | AB模式: " + currentState.getAbMode());
         log.info("开始计时 - 比赛类型: {}, 控制端: {}", currentMatchType.getName(), controlClientId);
+
+        // 触发空闲 -> 准备的鸣笛 (buzz1)
+        if (lastUpdateAt == 0) {
+            // 首次启动，触发准备阶段鸣笛
+            triggerBuzzer("buzz1");
+        }
+
         notifyStateChange();
     }
 
@@ -241,6 +258,10 @@ public class TimerEngine {
         lastUpdateAt = 0;
         screenElapsedAtSwitch = 0;
         isAScreenActive = true;
+
+        // 重置阶段切换跟踪
+        previousStageIndex = -1;
+        wasYellowLight = false;
 
         // 重置状态
         currentState.setStatus("idle");
@@ -461,7 +482,10 @@ public class TimerEngine {
      * 更新当前计时状态
      */
     private synchronized void updateTimerState() {
+        log.debug("[计时器状态更新] 开始更新计时器状态，isTimerRunning: {}, isTimerPaused: {}, timerStartedAt: {}, lastUpdateAt: {}",
+                isTimerRunning, isTimerPaused, timerStartedAt, lastUpdateAt);
         if (!isTimerRunning || isTimerPaused) {
+            log.debug("[计时器状态更新] 计时器未运行或已暂停，跳过更新");
             return;
         }
 
@@ -491,12 +515,19 @@ public class TimerEngine {
         }
 
         // 更新阶段信息
+        log.debug("[计时器状态更新] 调用updateCurrentStage，总经过时间: {}秒, 当前阶段索引: {}, 阶段名称: {}, 阶段颜色: {}",
+                totalElapsedSecondsInt, currentState.getCurrentStageIndex(),
+                currentState.getCurrentStageName(), currentState.getCurrentStageColor());
         updateCurrentStage(totalElapsedSecondsInt);
+        log.debug("[计时器状态更新] updateCurrentStage完成，新阶段索引: {}, 新阶段名称: {}, 新阶段颜色: {}",
+                currentState.getCurrentStageIndex(), currentState.getCurrentStageName(),
+                currentState.getCurrentStageColor());
 
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {
             long screenElapsed = now - screenElapsedAtSwitch;
-            currentState.setCurrentStageRemaining(currentState.getCurrentStageRemaining() - (int)(elapsedSinceLast / 1000));
+            // ❌ 移除：updateCurrentStage已经正确计算阶段剩余时间，这里不应该覆盖
+            // currentState.setCurrentStageRemaining(currentState.getCurrentStageRemaining() - (int)(elapsedSinceLast / 1000));
         }
 
         // 更新状态
@@ -518,8 +549,12 @@ public class TimerEngine {
      */
     private void updateCurrentStage(int totalElapsedSeconds) {
         if (currentMatchType == null) {
+            log.debug("[阶段更新] currentMatchType为null，跳过阶段更新");
             return;
         }
+
+        log.debug("[阶段更新] 开始更新阶段，总经过时间: {}秒, previousStageIndex: {}, wasYellowLight: {}",
+                totalElapsedSeconds, previousStageIndex, wasYellowLight);
 
         int accumulatedTime = 0;
         int currentStageIndex = -1;
@@ -530,11 +565,15 @@ public class TimerEngine {
         // 查找当前阶段
         for (int i = 0; i < currentMatchType.getStages().size(); i++) {
             MatchTypeDTO.StageDTO stage = currentMatchType.getStages().get(i);
+            log.debug("[阶段更新] 检查阶段{}: {}, 持续时间: {}秒, 累计时间: {}秒",
+                    i, stage.getName(), stage.getDuration(), accumulatedTime);
             if (totalElapsedSeconds < accumulatedTime + stage.getDuration()) {
                 currentStageIndex = i;
                 currentStage = stage;
                 stageElapsed = totalElapsedSeconds - accumulatedTime;
                 stageRemaining = stage.getDuration() - stageElapsed;
+                log.debug("[阶段更新] 找到当前阶段: {} (索引{}), 阶段已过: {}秒, 剩余: {}秒",
+                        stage.getName(), currentStageIndex, stageElapsed, stageRemaining);
                 break;
             }
             accumulatedTime += stage.getDuration();
@@ -546,31 +585,74 @@ public class TimerEngine {
             return;
         }
 
-        // 更新阶段信息
-        if (currentState.getCurrentStageIndex() != currentStageIndex) {
-            // 阶段切换，这里可以触发声音提示
-            log.info("切换到阶段: {}", currentStage.getName());
+        // 判断是否为黄灯状态
+        String stageColor = currentStage.getColor();
+        boolean isYellowLight = false;
+        Integer yellowLightTime = null;
+        if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
+            // 比赛阶段：检查是否进入黄灯时间
+            yellowLightTime = currentEnhancedMatchType.getYellowLightTime();
+            if (yellowLightTime != null && yellowLightTime > 0 && stageRemaining <= yellowLightTime) {
+                // 进入黄灯阶段
+                stageColor = "#FFFF00";  // 黄灯颜色
+                isYellowLight = true;
+                log.info("进入黄灯阶段 - 剩余时间: {} 秒, 黄灯时间: {} 秒", stageRemaining, yellowLightTime);
+            }
         }
 
+        // 检测阶段切换和黄灯状态变化，触发声音提示
+        boolean stageChanged = previousStageIndex != currentStageIndex;
+        boolean yellowLightChanged = (wasYellowLight != isYellowLight) && currentStageIndex == 1;
+
+        log.debug("[阶段更新] 阶段切换检测: stageChanged={} ({}->{}), yellowLightChanged={}, isYellowLight={}, stageColor={}",
+                stageChanged, previousStageIndex, currentStageIndex, yellowLightChanged, isYellowLight, stageColor);
+
+        // 阶段切换声音提示
+        if (stageChanged) {
+            log.info("🚦 切换到阶段: {} (索引: {} -> {})", currentStage.getName(), previousStageIndex, currentStageIndex);
+
+            // 根据阶段切换类型触发不同的鸣笛
+            if (previousStageIndex == -1 && currentStageIndex == 0) {
+                // 初始状态 -> 准备阶段 (在startTimer时触发，这里可能不会发生)
+                // triggerBuzzer("buzz1"); // 在startTimer方法中处理
+                log.debug("[阶段更新] 初始状态 -> 准备阶段");
+            } else if (previousStageIndex == 0 && currentStageIndex == 1) {
+                // 准备阶段 -> 比赛阶段
+                log.info("🔴 -> 🟢 准备阶段 -> 比赛阶段，触发buzz2鸣笛");
+                triggerBuzzer("buzz2");
+            } else if (currentStageIndex == -1) {
+                // 所有阶段结束，计时完成
+                log.info("⏹️ 所有阶段结束，计时完成");
+                // 可以触发结束声音，暂不处理
+            } else {
+                log.info("🔄 其他阶段切换: {} -> {}", previousStageIndex, currentStageIndex);
+            }
+        }
+
+        // 黄灯状态变化声音提示（比赛阶段进入黄灯）
+        if (yellowLightChanged && isYellowLight) {
+            log.info("🟢 -> 🟡 比赛阶段进入黄灯预警 - 剩余时间: {} 秒", stageRemaining);
+            triggerBuzzer("buzz3");
+        } else if (yellowLightChanged && !isYellowLight) {
+            log.debug("[阶段更新] 退出黄灯状态");
+        }
+
+        // 更新阶段信息
         currentState.setCurrentStageIndex(currentStageIndex);
         currentState.setCurrentStageName(currentStage.getName());
         currentState.setCurrentStageDuration(currentStage.getDuration());
         currentState.setCurrentStageElapsed(stageElapsed);
         currentState.setCurrentStageRemaining(stageRemaining);
-
-        // 关键逻辑：如果是比赛阶段（index=1）且进入黄灯时间，改变灯色
-        String stageColor = currentStage.getColor();
-        if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
-            // 比赛阶段：检查是否进入黄灯时间
-            Integer yellowLightTime = currentEnhancedMatchType.getYellowLightTime();
-            if (yellowLightTime != null && yellowLightTime > 0 && stageRemaining <= yellowLightTime) {
-                // 进入黄灯阶段
-                stageColor = "#FFFF00";  // 黄灯颜色
-                log.info("进入黄灯阶段 - 剩余时间: {} 秒, 黄灯时间: {} 秒", stageRemaining, yellowLightTime);
-            }
-        }
-
         currentState.setCurrentStageColor(stageColor);
+
+        log.debug("[阶段更新] 状态已更新 - 阶段索引: {}, 名称: {}, 颜色: {}, 剩余时间: {}秒",
+                currentStageIndex, currentStage.getName(), stageColor, stageRemaining);
+
+        // 保存当前状态用于下一次检测
+        previousStageIndex = currentStageIndex;
+        wasYellowLight = isYellowLight;
+
+        log.debug("[阶段更新] 完成 - previousStageIndex更新为: {}, wasYellowLight: {}", previousStageIndex, wasYellowLight);
     }
 
     /**
@@ -675,13 +757,31 @@ public class TimerEngine {
 
     /**
      * 通知状态变更
+     * ✅ 改进：如果callback为null，通过messagingTemplate直接发送
      */
     private void notifyStateChange() {
+        log.debug("[状态变更通知] 开始，stateChangeCallback: {}, 当前阶段: {} (索引{}), 颜色: {}",
+                stateChangeCallback != null ? "已设置" : "null",
+                currentState.getCurrentStageName(), currentState.getCurrentStageIndex(),
+                currentState.getCurrentStageColor());
         if (stateChangeCallback != null) {
             try {
                 stateChangeCallback.accept(currentState);
+                log.debug("[状态变更通知] 回调执行成功，已广播状态");
             } catch (Exception e) {
-                log.error("状态变更回调异常", e);
+                log.error("❌ 状态变更回调异常", e);
+            }
+        } else {
+            // ✅ 如果callback为null，尝试通过messagingTemplate直接发送
+            if (messagingTemplate != null) {
+                try {
+                    messagingTemplate.convertAndSend("/topic/timer-state", currentState);
+                    log.debug("📡 通过messagingTemplate广播状态（callback为null）");
+                } catch (Exception e) {
+                    log.warn("⚠️ 通过messagingTemplate广播状态失败: {}", e.getMessage());
+                }
+            } else {
+                log.warn("⚠️ stateChangeCallback为null，且messagingTemplate也未初始化，无法广播状态变更");
             }
         }
     }
@@ -821,6 +921,41 @@ public class TimerEngine {
             currentState.setBPrompt(prompt);
         }
         notifyStateChange();
+    }
+
+    /**
+     * 触发鸣笛声音
+     * @param buzzerType 鸣笛类型：buzz1（1声）, buzz2（2声）, buzz3（3声）, countdown（倒计时）, manual（手动）
+     */
+    private void triggerBuzzer(String buzzerType) {
+        log.debug("[鸣笛触发] 尝试触发鸣笛: {}, 当前阶段: {} (索引{}), 声音启用: {}",
+                buzzerType, currentState.getCurrentStageName(), currentState.getCurrentStageIndex(),
+                currentState.getSoundEnabled());
+
+        if (messagingTemplate == null) {
+            log.warn("❌ messagingTemplate未设置，无法触发鸣笛: {}", buzzerType);
+            return;
+        }
+        // 检查声音是否启用：默认为true，如果为null则视为启用
+        Boolean soundEnabled = currentState.getSoundEnabled();
+        if (soundEnabled != null && !soundEnabled) {
+            log.debug("[鸣笛触发] 声音已禁用，跳过鸣笛: {}", buzzerType);
+            return;
+        }
+        try {
+            Map<String, Object> buzzerMessage = new HashMap<>();
+            buzzerMessage.put("type", "autoBuzzer");
+            buzzerMessage.put("buzzerType", buzzerType);
+            buzzerMessage.put("timestamp", System.currentTimeMillis());
+            buzzerMessage.put("success", true);
+            buzzerMessage.put("stageIndex", currentState.getCurrentStageIndex());
+            buzzerMessage.put("stageName", currentState.getCurrentStageName());
+
+            messagingTemplate.convertAndSend("/topic/buzzer", buzzerMessage);
+            log.info("✅ 自动触发鸣笛: {} (阶段: {})", buzzerType, currentState.getCurrentStageName());
+        } catch (Exception e) {
+            log.error("❌ 触发鸣笛失败: {}", buzzerType, e);
+        }
     }
 
     @PreDestroy
