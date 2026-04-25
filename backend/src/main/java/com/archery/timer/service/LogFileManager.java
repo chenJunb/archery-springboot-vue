@@ -122,6 +122,7 @@ public class LogFileManager {
 
     /**
      * 写入每日日志文件
+     * ✅ 改进：添加文件存在性检查防止竞态条件
      */
     private void writeToDailyLog(String logEntry) {
         writeLock.lock();
@@ -129,9 +130,24 @@ public class LogFileManager {
             // 检查是否需要更新日志文件（每天一个新文件）
             updateDailyLogFile();
 
-            if (dailyLogFile != null && Files.exists(dailyLogFile.getParent())) {
-                Files.writeString(dailyLogFile, logEntry,
-                    StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+            // ✅ 修复：再次检查日志文件是否仍然存在（可能被其他线程删除）
+            if (dailyLogFile != null && Files.exists(dailyLogFile.getParent()) && Files.exists(dailyLogFile)) {
+                try {
+                    Files.writeString(dailyLogFile, logEntry,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                } catch (IOException e) {
+                    // 如果文件在写入时被删除，尝试重新创建
+                    if (!Files.exists(dailyLogFile)) {
+                        log.warn("⚠️ 日志文件在写入时被删除，尝试重新创建");
+                        updateDailyLogFile();
+                        if (Files.exists(dailyLogFile)) {
+                            Files.writeString(dailyLogFile, logEntry,
+                                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                        }
+                    } else {
+                        throw e;
+                    }
+                }
             }
         } catch (Exception e) {
             log.error("写入日志文件失败", e);
@@ -180,7 +196,7 @@ public class LogFileManager {
 
     /**
      * 清理旧日志文件
-     * ✅ 改进：正确删除超出限制的文件
+     * ✅ 改进：正确删除超出限制的文件，同时保护当前日志文件
      */
     private void cleanupOldLogFiles() {
         try {
@@ -206,10 +222,22 @@ public class LogFileManager {
 
                     for (int i = maxLogFiles; i < allFiles.length; i++) {
                         try {
-                            Files.delete(allFiles[i]);
-                            log.info("✅ 已删除过期日志文件: {}", allFiles[i].getFileName());
+                            Path fileToDelete = allFiles[i];
+                            // ✅ 修复：检查不要删除当前日志文件
+                            if (dailyLogFile != null && fileToDelete.equals(dailyLogFile)) {
+                                log.debug("⚠️ 跳过删除当前活跃日志文件: {}", fileToDelete.getFileName());
+                                continue;
+                            }
+
+                            // ✅ 修复：在删除前检查文件是否仍存在（可能已被其他进程删除）
+                            if (Files.exists(fileToDelete)) {
+                                Files.delete(fileToDelete);
+                                log.info("✅ 已删除过期日志文件: {}", fileToDelete.getFileName());
+                            } else {
+                                log.debug("日志文件已被删除: {}", fileToDelete.getFileName());
+                            }
                         } catch (IOException e) {
-                            log.error("❌ 删除日志文件失败: {}", allFiles[i].getFileName(), e);
+                            log.warn("❌ 删除日志文件失败: {} - {}", allFiles[i].getFileName(), e.getMessage());
                         }
                     }
 

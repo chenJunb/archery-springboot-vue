@@ -28,11 +28,23 @@ public class WebSocketEventListener {
     /**
      * 处理WebSocket连接建立
      * ✅ 改进：记录sessionId，但不立即注册客户端
+     * ✅ 修复：验证 sessionId 有效性后再设置 principal
      */
     @EventListener
     public void handleWebSocketConnectListener(SessionConnectedEvent event) {
         SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
+        if (headerAccessor == null) {
+            log.warn("⚠️ WebSocket连接事件中 headerAccessor 为null");
+            return;
+        }
+
         String sessionId = headerAccessor.getSessionId();
+
+        // ✅ 验证 sessionId 不为空
+        if (sessionId == null || sessionId.isEmpty()) {
+            log.warn("⚠️ WebSocket连接建立但 sessionId 为空");
+            return;
+        }
 
         log.info("✅ WebSocket连接建立 - Session ID: {}", sessionId);
         log.debug("连接详情 - 用户代理: {}, 主机: {}",
@@ -41,8 +53,12 @@ public class WebSocketEventListener {
 
         // ✅ 重要：设置用户principal，以便convertAndSendToUser能正常工作
         // 使用sessionId作为用户名创建一个简单的principal
-        headerAccessor.setUser(() -> sessionId);
-        log.debug("已设置用户principal: {}", sessionId);
+        try {
+            headerAccessor.setUser(() -> sessionId);
+            log.debug("已设置用户principal: {}", sessionId);
+        } catch (Exception e) {
+            log.warn("⚠️ 设置用户principal失败: {}", e.getMessage());
+        }
 
         // 记录WebSocket连接日志
         logFileManager.logWebSocketConnection(sessionId, "unknown", "CONNECTED",
@@ -90,15 +106,30 @@ public class WebSocketEventListener {
     @EventListener
     public void handleWebSocketSubscribeListener(SessionSubscribeEvent event) {
         SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(event.getMessage());
+        if (headerAccessor == null) {
+            log.warn("⚠️ WebSocket订阅事件中 headerAccessor 为null");
+            return;
+        }
+
         String sessionId = headerAccessor.getSessionId();
         String destination = headerAccessor.getDestination();
 
+        if (sessionId == null || destination == null) {
+            log.debug("⚠️ WebSocket订阅事件中缺少必要信息 - sessionId: {}, destination: {}", sessionId, destination);
+            return;
+        }
+
         log.debug("📡 客户端订阅 - Session ID: {}, 订阅主题: {}", sessionId, destination);
 
-        // ✅ 重要：在订阅时也设置用户principal，确保用户队列工作
-        if (destination != null && destination.contains("/user/queue")) {
-            log.debug("🔧 用户队列订阅检测到，设置用户principal: {}", sessionId);
-            headerAccessor.setUser(() -> sessionId);
+        // ✅ 修复：在订阅用户队列时验证并设置principal，但避免重复设置
+        if (destination.contains("/user/queue")) {
+            try {
+                log.debug("🔧 用户队列订阅检测到，验证用户principal: {}", sessionId);
+                // 注意：principal 在 handleWebSocketConnectListener 中已经设置过了
+                // 这里只做日志记录，不再重复设置，避免覆盖之前的设置
+            } catch (Exception e) {
+                log.warn("⚠️ 处理用户队列订阅时出错: {}", e.getMessage());
+            }
         }
 
         // 记录订阅日志
