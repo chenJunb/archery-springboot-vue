@@ -37,20 +37,40 @@ public class WebSocketService {
 
     @PostConstruct
     public void init() {
-        // 启动清理任务
-        cleanupScheduler = Executors.newSingleThreadScheduledExecutor();
-        cleanupScheduler.scheduleAtFixedRate(this::cleanupIdleClients, 1, 1, TimeUnit.MINUTES);
-        cleanupScheduler.scheduleAtFixedRate(this::checkControlHeartbeat, 30, 30, TimeUnit.SECONDS);
+        try {
+            // 启动清理任务
+            cleanupScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "WebSocket-Cleanup");
+                thread.setDaemon(false);
+                return thread;
+            });
+            cleanupScheduler.scheduleAtFixedRate(this::cleanupIdleClients, 1, 1, TimeUnit.MINUTES);
+            cleanupScheduler.scheduleAtFixedRate(this::checkControlHeartbeat, 30, 30, TimeUnit.SECONDS);
 
-        log.info("WebSocket服务初始化完成");
+            log.info("WebSocket服务初始化完成");
+        } catch (Exception e) {
+            log.error("❌ WebSocket服务初始化失败", e);
+            // 不抛出异常，让Bean创建继续进行，但记录日志
+        }
     }
 
     @PreDestroy
     public void shutdown() {
         if (cleanupScheduler != null) {
-            cleanupScheduler.shutdown();
+            try {
+                cleanupScheduler.shutdown();
+                // ✅ 修复：等待现有任务完成，最多等待5秒
+                if (!cleanupScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    log.warn("⚠️ WebSocket清理调度器在超时内未完全关闭，执行强制关闭");
+                    cleanupScheduler.shutdownNow();
+                }
+                log.info("✅ WebSocket服务已正确关闭");
+            } catch (InterruptedException e) {
+                log.error("❌ 等待WebSocket清理调度器关闭时被中断", e);
+                cleanupScheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
-        log.info("WebSocket服务关闭");
     }
 
     /**

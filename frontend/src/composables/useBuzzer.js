@@ -16,22 +16,22 @@ function getGlobalSounds() {
         logService.debug('首次创建全局音频对象（单例）')
         globalSounds = {
             beep1: new Howl({
-                src: ['/sounds/1-beep.mp3', '/sounds/1-beep.wav'],
-                volume: 0.5,
-                onload: () => logService.debug('1-beep 音频加载完成'),
-                onerror: (id, error) => logService.error('1-beep 音频加载失败', { error: error.toString() })
+                src: ['/sounds/countdown_audio.mp3'],
+                volume: 0.7,
+                onload: () => logService.debug('蜂鸣声1音频加载完成'),
+                onerror: (id, error) => logService.error('蜂鸣声1音频加载失败', { error: error.toString() })
             }),
             beep2: new Howl({
-                src: ['/sounds/2-beep.mp3', '/sounds/2-beep.wav'],
-                volume: 0.5,
-                onload: () => logService.debug('2-beep 音频加载完成'),
-                onerror: (id, error) => logService.error('2-beep 音频加载失败', { error: error.toString() })
+                src: ['/sounds/countdown_audio.mp3'],
+                volume: 0.7,
+                onload: () => logService.debug('蜂鸣声2音频加载完成'),
+                onerror: (id, error) => logService.error('蜂鸣声2音频加载失败', { error: error.toString() })
             }),
             beep3: new Howl({
-                src: ['/sounds/3-beep.mp3', '/sounds/3-beep.wav'],
-                volume: 0.5,
-                onload: () => logService.debug('3-beep 音频加载完成'),
-                onerror: (id, error) => logService.error('3-beep 音频加载失败', { error: error.toString() })
+                src: ['/sounds/countdown_audio.mp3'],
+                volume: 0.7,
+                onload: () => logService.debug('蜂鸣声3音频加载完成'),
+                onerror: (id, error) => logService.error('蜂鸣声3音频加载失败', { error: error.toString() })
             }),
             countdown: new Howl({
                 src: ['/sounds/countdown_audio.mp3', '/sounds/countdown_audio.wav'],
@@ -78,16 +78,31 @@ export function useBuzzer() {
         playSound('beep1')
     }
 
-    // 2声（进入比赛）
+    // 2声（进入比赛）- 播放两次，间隔300ms
     function buzz2() {
         logService.event('BUZZER_2_BEEP', { reason: '进入比赛阶段' })
         playSound('beep2')
+        setTimeout(() => {
+            if (!isMuted.value) {
+                playSound('beep2')
+            }
+        }, 300)
     }
 
-    // 3声（进入黄灯）
+    // 3声（进入黄灯）- 播放三次，间隔250ms
     function buzz3() {
         logService.event('BUZZER_3_BEEP', { reason: '进入黄灯/最后阶段' })
         playSound('beep3')
+        setTimeout(() => {
+            if (!isMuted.value) {
+                playSound('beep3')
+                setTimeout(() => {
+                    if (!isMuted.value) {
+                        playSound('beep3')
+                    }
+                }, 250)
+            }
+        }, 250)
     }
 
     // 倒计时声音

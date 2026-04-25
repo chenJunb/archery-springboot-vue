@@ -1,0 +1,57 @@
+✅ WebSocket 客户端注册修复已完成
+
+=== 后端修改 ===
+文件: backend/src/main/java/com/archery/timer/controller/EnhancedWebSocketController.java
+修改: 将 convertAndSendToUser() 改为 convertAndSend() 使用完整路径
+原因: SimpleBroker 配置下直接路径更可靠
+
+=== 验证步骤 ===
+
+1️⃣ 确保后端和前端都在运行
+   - 后端: http://localhost:8080/ws-archery-timer (应显示 Welcome to SockJS!)
+   - 前端: http://localhost:3000/ (应显示射箭比赛计时控制系统)
+
+2️⃣ 打开浏览器访问 http://localhost:3000/
+
+3️⃣ 按 F12 打开开发者工具，切换到 Console 标签
+
+4️⃣ 等待 2-3 秒后，查看 Console 中的日志：
+   应该看到:
+   ✅ 客户端注册请求已发送
+   ✅ 收到注册成功消息
+   ✅ 客户端注册成功
+
+5️⃣ 在 Console 中输入以下命令检查状态:
+   globalConnectionState
+   
+   预期输出 (所有字段都应该正确填充):
+   {
+     isConnected: true
+     isRegistered: true
+     clientId: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+     clientType: "control"
+     clientName: "控制端"
+     registerTime: "2026-04-25T..."
+   }
+
+6️⃣ 页面右上角应显示 "已连接" (绿色指示灯)
+
+=== 如果问题仍然存在 ===
+1. 检查后端日志中是否有:
+   📤 发送注册成功消息详情
+   ✅ 注册成功响应已发送 (通过直接路径: ...)
+   
+2. 检查前端 Console 中是否有错误消息
+
+3. 检查浏览器网络标签 (F12 → Network) 是否有 WebSocket 连接
+
+=== 关键改进 ===
+- 注册消息现在通过可靠的直接路径发送: /user/{sessionId}/queue/messages
+- 同时发送到全局用户队列作为备份: /user/queue/messages
+- 发送调试消息到 /topic/debug 便于排查
+
+=== 预期效果 ===
+✅ 连接状态: 已连接 (绿色)
+✅ 客户端ID: 有效的UUID
+✅ 注册状态: 已注册 (true)
+✅ 可以正常操作计时器和切换屏幕

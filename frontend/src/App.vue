@@ -12,9 +12,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { initGlobalWebSocket, globalConnectionState } from './services/globalWebSocketService'
+import { initGlobalWebSocket, globalConnectionState, disconnectGlobalWebSocket } from './services/globalWebSocketService'
 import { logService } from './services/logService'
 
 const route = useRoute()
@@ -23,7 +23,22 @@ const route = useRoute()
 onMounted(() => {
   logService.info('App 根组件挂载，初始化全局 WebSocket 连接...')
   initGlobalWebSocket()
+
+  // 添加页面卸载事件监听
+  window.addEventListener('beforeunload', handlePageUnload)
 })
+
+// 组件卸载时清理
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handlePageUnload)
+  logService.debug('🔧 App组件卸载')
+})
+
+// 页面卸载处理函数
+function handlePageUnload() {
+  logService.info('📄 页面即将卸载，断开WebSocket连接...')
+  disconnectGlobalWebSocket()
+}
 
 // 根据路由设置主题
 const themeClass = computed(() => {

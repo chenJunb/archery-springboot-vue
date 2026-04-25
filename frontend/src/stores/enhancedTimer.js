@@ -11,7 +11,8 @@ import {
   getClientTypeFromRoute,
   sendGlobalWebSocketMessage,
   subscribeToTopic,
-  disconnectGlobalWebSocket
+  disconnectGlobalWebSocket,
+  getGlobalStompClient
 } from '../services/globalWebSocketService'
 import { logService } from '../services/logService'
 
@@ -92,6 +93,9 @@ let screenALastRemaining = 0
 let screenBLastUpdateTime = 0
 let screenBLastRemaining = 0
 
+// 连接状态检查定时器引用
+let connectionCheckInterval = null
+
 // 启动本地计时器 - 提供实时显示效果
 function startLocalCountdown() {
   if (localCountdownInterval) {
@@ -129,10 +133,8 @@ function initMessageListeners() {
   const unsubscribe = onGlobalWebSocketMessage((type, data) => {
     switch (type) {
       case 'connected':
-        logService.debug('✅ 全局WebSocket已连接，准备注册客户端...')
-        // 自动注册客户端
-        const clientType = getClientTypeFromRoute()
-        registerGlobalClient(clientType)
+        logService.debug('✅ 全局WebSocket已连接，等待主题订阅完成...')
+        // 等待connection_ready消息再进行注册
         break
 
       case 'disconnected':
@@ -140,15 +142,64 @@ function initMessageListeners() {
         break
 
       case 'registered':
-        logService.debug('✅ 客户端注册成功:', data)
+        logService.info('✅ 客户端注册成功:', data)
+
+        // ✅ 关键修复：确保注册状态正确更新
+        if (data?.success && data?.clientId) {
+          logService.info('📝 更新store中的注册状态', {
+            success: data.success,
+            clientId: data.clientId,
+            before: {
+              isRegistered: globalConnectionState.isRegistered,
+              clientId: globalConnectionState.clientId
+            }
+          })
+
+          // 虽然globalConnectionState已经在globalWebSocketService.js中更新了
+          // 但为了保险，这里也同步更新一下
+          globalConnectionState.clientId = data.clientId
+          globalConnectionState.isRegistered = true
+
+          logService.info('✅ Store注册状态已同步', {
+            after: {
+              isRegistered: globalConnectionState.isRegistered,
+              clientId: globalConnectionState.clientId
+            }
+          })
+        }
+
+        // 注册成功，重置注册状态
+        if (registrationState.isRegistrationInProgress) {
+          logService.debug('🔓 注册成功，重置注册状态')
+          setRegistrationInProgress(false)
+        }
         break
 
       case 'connection_ready':
         logService.debug('🔗 WebSocket连接就绪')
+        // ✅ 注册请求现在由 globalWebSocketService 中的 subscribeToAllTopics() 负责
+        // 这里只是记录连接已就绪，不需要再尝试注册
+        if (globalConnectionState.isRegistered) {
+          logService.debug('✅ 客户端已注册')
+        }
         break
 
       case 'timer_state':
-        logService.debug('📥 收到计时器状态更新')
+        logService.debug('📥 [Store] 收到计时器状态更新（通过广播）', {
+          preparationTime: data.preparationTime,
+          competitionTime: data.competitionTime,
+          yellowLightTime: data.yellowLightTime,
+          currentStageRemaining: data.currentStageRemaining,
+          screenARemaining: data.screenARemaining,
+          screenBRemaining: data.screenBRemaining
+        })
+
+        logService.event('TIMER_STATE_APPLIED', {
+          source: 'broadcast_message',
+          hasTimeConfig: data.preparationTime !== undefined && data.competitionTime !== undefined,
+          hasCurrentStageRemaining: data.currentStageRemaining !== undefined,
+          timestamp: new Date().toISOString()
+        })
 
         // ✅ "后端单一数据源"原则：无条件接收后端状态
         // 前端不应该"保护"任何字段以阻止后端更新
@@ -157,11 +208,13 @@ function initMessageListeners() {
         // ✅ 合并服务器状态到timerState（完全信任后端）
         Object.assign(timerState, data)
 
-        logService.debug('✅ 已应用后端状态（包括所有时间配置）', {
+        logService.debug('✅ [Store] 已应用后端状态（包括所有时间配置）', {
           preparationTime: timerState.preparationTime,
           competitionTime: timerState.competitionTime,
           yellowLightTime: timerState.yellowLightTime,
-          currentStageRemaining: timerState.currentStageRemaining
+          currentStageRemaining: timerState.currentStageRemaining,
+          screenARemaining: timerState.screenARemaining,
+          screenBRemaining: timerState.screenBRemaining
         })
 
         // 同步本地计时 - 更新基准时间和剩余时间
@@ -193,6 +246,34 @@ function initMessageListeners() {
         logService.debug('📋 收到比赛类型详细信息:', data)
         break
 
+      case 'debug':
+        logService.debug('🔧 收到调试消息:', data)
+        // 处理特定类型的调试消息
+        if (data?.type === 'client_registered_debug' && data?.data?.clientId) {
+          const clientId = data.data.clientId
+          const sessionId = data.data.sessionId
+          logService.info('🔧 从调试消息中提取clientId:', { clientId, sessionId })
+          // 更新全局连接状态
+          if (!globalConnectionState.isRegistered) {
+            globalConnectionState.clientId = clientId
+            globalConnectionState.isRegistered = true
+            globalConnectionState.registerTime = new Date().toISOString()
+            logService.info('✅ 通过调试消息更新客户端注册状态', {
+              clientId: globalConnectionState.clientId,
+              clientType: globalConnectionState.clientType,
+              isRegistered: globalConnectionState.isRegistered
+            })
+            // 重置注册进度状态
+            if (registrationState.isRegistrationInProgress) {
+              logService.debug('🔓 调试消息：注册成功，重置注册状态')
+              setRegistrationInProgress(false)
+            }
+          }
+        } else if (data?.type === 'test_direct_message' || data?.type === 'test_global_message') {
+          logService.debug('🔧 收到用户队列测试消息:', data)
+        }
+        break
+
       case 'error':
         logService.error('❌ 收到错误消息:', data)
         break
@@ -207,30 +288,164 @@ export function useEnhancedTimerStore() {
   logService.debug('🚀 使用 EnhancedTimerStore，初始化消息监听...')
   logService.debug('📍 页面URL:', window.location.href)
 
+  // 用于控制注册状态的状态变量 - 现在在闭包作用域中
+  let registrationState = {
+    isRegistrationInProgress: false,
+    lastRegistrationAttempt: 0
+  }
+
+  // 更新注册状态的函数
+  const setRegistrationInProgress = (value) => {
+    registrationState.isRegistrationInProgress = value
+    if (value) {
+      registrationState.lastRegistrationAttempt = Date.now()
+    }
+  }
+
+  // 检查是否可以重试注册
+  const canRetryRegistration = () => {
+    const timeSinceLastAttempt = Date.now() - registrationState.lastRegistrationAttempt
+    return !registrationState.isRegistrationInProgress && timeSinceLastAttempt > 5000
+  }
+
+  // 自动连接函数定义
+  const autoConnect = () => {
+    logService.debug('🔄 自动连接 - 注册客户端类型', {
+      isConnected: globalConnectionState.isConnected,
+      clientId: globalConnectionState.clientId,
+      clientType: globalConnectionState.clientType,
+      isRegistrationInProgress: registrationState.isRegistrationInProgress
+    })
+
+    const clientType = getClientTypeFromRoute()
+    globalConnectionState.clientType = clientType
+    logService.debug('📝 客户端类型设置为:', clientType)
+
+    // 详细检查连接状态
+    const globalStompClient = getGlobalStompClient()
+    const stompConnected = globalStompClient?.connected
+    logService.debug('📡 WebSocket连接状态详细检查', {
+      globalConnectionState_isConnected: globalConnectionState.isConnected,
+      globalStompClient_exists: !!globalStompClient,
+      stompConnected: stompConnected,
+      clientId: globalConnectionState.clientId
+    })
+
+    if (!globalConnectionState.isConnected) {
+      logService.warn('⚠️ WebSocket未连接，跳过注册')
+      return false
+    }
+
+    if (!stompConnected) {
+      logService.warn('⚠️ STOMP客户端未就绪，等待connection_ready消息')
+      return false
+    }
+
+    const success = registerGlobalClient(clientType)
+    if (!success) {
+      logService.warn('⚠️ 客户端注册消息发送失败，可能WebSocket未就绪')
+      // 立即重置注册状态，允许下一次尝试
+      setTimeout(() => {
+        logService.debug('🔓 重置注册状态，允许下一次注册尝试')
+        setRegistrationInProgress(false)
+      }, 1000)
+    } else {
+      logService.debug('✅ 客户端注册请求已发送，等待后端响应...', {
+          clientType,
+          clientId: globalConnectionState.clientId,
+          isConnected: globalConnectionState.isConnected,
+          stompConnected: stompConnected,
+          timestamp: new Date().toISOString()
+        })
+    }
+    return success
+  }
+
   // 初始化消息监听（每个页面使用 store 时初始化一次）
   initMessageListeners()
+
+  // ✅ 延迟自动连接，确保 WebSocket 已连接
+  // 不要在这里立即调用 autoConnect()，让 globalWebSocketService.js 中的 onConnect 处理
+  // 这里只需要 initMessageListeners() 设置监听器即可
 
   // 添加连接状态变化监听器，持续检查连接状态
   let connectionCheckCount = 0
   const maxCheckCount = 30 // 最多检查30秒
-  const checkConnectionInterval = setInterval(() => {
+
+  // 防止重复注册的标志
+  let isRegistrationInProgress = false
+
+  // 清理之前可能存在的定时器
+  if (connectionCheckInterval) {
+    clearInterval(connectionCheckInterval)
+    connectionCheckInterval = null
+  }
+
+  connectionCheckInterval = setInterval(() => {
     connectionCheckCount++
 
-    if (globalConnectionState.isConnected && globalConnectionState.clientId) {
-      logService.debug('✅ WebSocket连接已建立:', {
+    if (globalConnectionState.isConnected && globalConnectionState.isRegistered) {
+      logService.debug('✅ WebSocket连接已建立并注册:', {
         clientId: globalConnectionState.clientId,
-        clientType: globalConnectionState.clientType
+        clientType: globalConnectionState.clientType,
+        isRegistered: globalConnectionState.isRegistered
       })
-      clearInterval(checkConnectionInterval)
+      clearInterval(connectionCheckInterval)
+      connectionCheckInterval = null
     } else if (connectionCheckCount >= maxCheckCount) {
-      logService.warn('⚠️ WebSocket连接仍未建立，请检查服务器连接')
-      clearInterval(checkConnectionInterval)
+      logService.warn('⚠️ WebSocket连接仍未建立，请检查服务器连接', {
+        isConnected: globalConnectionState.isConnected,
+        isRegistered: globalConnectionState.isRegistered,
+        clientId: globalConnectionState.clientId
+      })
+      clearInterval(connectionCheckInterval)
+      connectionCheckInterval = null
+      // 超时后重置注册状态
+      isRegistrationInProgress = false
     } else {
+      const stompClient = getGlobalStompClient()
       logService.debug('⏳ 等待WebSocket连接建立...', {
         isConnected: globalConnectionState.isConnected,
         clientId: globalConnectionState.clientId,
-        checkCount: connectionCheckCount
+        isRegistered: globalConnectionState.isRegistered,
+        checkCount: connectionCheckCount,
+        stompConnected: stompClient?.connected || false,
+        hasStompClient: !!stompClient,
+        timestamp: new Date().toISOString()
       })
+
+      // 如果已连接但没有注册，尝试重新注册
+      // 添加防抖：避免频繁重新注册
+      if (globalConnectionState.isConnected && !globalConnectionState.isRegistered && canRetryRegistration() && connectionCheckCount % 10 === 0) {
+        const currentStompClient = getGlobalStompClient()
+        logService.debug('🔄 已连接但未注册，尝试重新注册...', {
+          isConnected: globalConnectionState.isConnected,
+          clientId: globalConnectionState.clientId,
+          isRegistered: globalConnectionState.isRegistered,
+          stompConnected: currentStompClient?.connected || false,
+          registrationInProgress: registrationState.isRegistrationInProgress,
+          timestamp: new Date().toISOString()
+        })
+        setRegistrationInProgress(true)
+
+        // 设置注册超时：如果在5秒内没有收到注册响应，允许下一次注册
+        setTimeout(() => {
+          if (!globalConnectionState.isRegistered) {
+            const timeoutStompClient = getGlobalStompClient()
+            logService.warn('⏳ 注册超时，允许下一次注册尝试', {
+              isConnected: globalConnectionState.isConnected,
+              clientId: globalConnectionState.clientId,
+              isRegistered: globalConnectionState.isRegistered,
+              stompConnected: timeoutStompClient?.connected || false,
+              timeSinceLastAttempt: Date.now() - registrationState.lastRegistrationAttempt,
+              timestamp: new Date().toISOString()
+            })
+            setRegistrationInProgress(false)
+          }
+        }, 5000)
+
+        autoConnect()
+      }
     }
   }, 1000)
 
@@ -304,15 +519,7 @@ export function useEnhancedTimerStore() {
     return state.currentStageRemaining
   }
 
-  // 自动连接（全局连接已在 App.vue 中初始化）
-  const autoConnect = () => {
-    logService.debug('🔄 自动连接 - 注册客户端类型')
-    const clientType = getClientTypeFromRoute()
-    globalConnectionState.clientType = clientType
-    logService.debug('📝 客户端类型设置为:', clientType)
-    registerGlobalClient(clientType)
-  }
-
+  
   // 获取所有增强版比赛类型
   const fetchEnhancedMatchTypes = async () => {
     try {
@@ -347,6 +554,7 @@ export function useEnhancedTimerStore() {
 
   // 选择比赛类型
   const selectMatchType = (matchTypeId) => {
+    logService.info('📤 发送选择比赛类型消息', { matchTypeId })
     sendGlobalWebSocketMessage('timer/select-match-type', { matchTypeId })
   }
 
@@ -437,55 +645,53 @@ export function useEnhancedTimerStore() {
       return
     }
 
-    // ✅ 修复：订阅并存储unsubscribe函数
-    // 订阅计时器状态
-    const sub1 = subscribeToTopic('/topic/timer-state', (data) => {
-      logService.debug('📥 收到后端广播的计时器状态', {
-        preparationTime: data.preparationTime,
-        competitionTime: data.competitionTime,
-        currentStageRemaining: data.currentStageRemaining
-      })
-      // ✅ 无条件接收后端状态（后端单一数据源原则）
-      Object.assign(timerState, data)
-    })
-
-    if (!sub1) {
-      logService.error('❌ 订阅 /topic/timer-state 失败')
-    } else {
-      unsubscribeCallbacks.push(sub1)
-      logService.info('✅ 已订阅 /topic/timer-state')
-    }
+    // ✅ 重要修复：只订阅额外主题，不重复订阅 /topic/timer-state
+    // /topic/timer-state 已在 globalWebSocketService.js 的 subscribeToAllTopics() 中全局订阅
+    // 该消息会通过 broadcastMessage('timer_state', timerData) 广播到所有页面
+    // 并通过 initMessageListeners() 中的 onGlobalWebSocketMessage 处理
 
     // 订阅比赛类型
-    const sub2 = subscribeToTopic('/topic/match-types', (data) => {
+    const sub1 = subscribeToTopic('/topic/match-types', (data) => {
       if (data.type === 'matchTypes' && data.success) {
         enhancedMatchTypes.value = data.data
       }
     })
-    if (sub2) unsubscribeCallbacks.push(sub2)
+    if (sub1) {
+      unsubscribeCallbacks.push(sub1)
+      logService.info('✅ 已订阅 /topic/match-types')
+    }
 
     // 订阅AB屏模式配置
-    const sub3 = subscribeToTopic('/topic/match-type-screen-mode', (data) => {
+    const sub2 = subscribeToTopic('/topic/match-type-screen-mode', (data) => {
       logService.debug('📋 收到AB屏模式配置:', data)
     })
-    if (sub3) unsubscribeCallbacks.push(sub3)
+    if (sub2) {
+      unsubscribeCallbacks.push(sub2)
+      logService.info('✅ 已订阅 /topic/match-type-screen-mode')
+    }
 
     // 订阅比赛类型详细信息
-    const sub4 = subscribeToTopic('/topic/match-type-details', (data) => {
+    const sub3 = subscribeToTopic('/topic/match-type-details', (data) => {
       logService.debug('📋 收到比赛类型详细信息:', data)
     })
-    if (sub4) unsubscribeCallbacks.push(sub4)
+    if (sub3) {
+      unsubscribeCallbacks.push(sub3)
+      logService.info('✅ 已订阅 /topic/match-type-details')
+    }
 
     // 订阅鸣笛
-    const sub5 = subscribeToTopic('/topic/buzzer', (data) => {
+    const sub4 = subscribeToTopic('/topic/buzzer', (data) => {
       logService.debug('📢 收到鸣笛通知:', data)
       // 这里可以播放鸣笛声音
     })
-    if (sub5) unsubscribeCallbacks.push(sub5)
+    if (sub4) {
+      unsubscribeCallbacks.push(sub4)
+      logService.info('✅ 已订阅 /topic/buzzer')
+    }
 
-    logService.info(`✅ 已成功订阅 ${unsubscribeCallbacks.length} 个主题`, {
+    logService.info(`✅ 已成功订阅 ${unsubscribeCallbacks.length} 个额外主题`, {
       successCount: unsubscribeCallbacks.length,
-      totalAttempted: 5
+      note: '/topic/timer-state 通过全局广播处理，不在此重复订阅'
     })
   }
 
@@ -551,6 +757,13 @@ export function useEnhancedTimerStore() {
     stopLocalCountdown()
     unsubscribeCallbacks.forEach(cb => cb())
     unsubscribeCallbacks.length = 0
+
+    // 清理连接状态检查定时器
+    if (connectionCheckInterval) {
+      clearInterval(connectionCheckInterval)
+      connectionCheckInterval = null
+      logService.debug('🔧 连接状态检查定时器已清理')
+    }
   }
 
   return {

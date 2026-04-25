@@ -39,6 +39,11 @@ public class WebSocketEventListener {
             headerAccessor.getNativeHeader("user-agent"),
             headerAccessor.getNativeHeader("host"));
 
+        // ✅ 重要：设置用户principal，以便convertAndSendToUser能正常工作
+        // 使用sessionId作为用户名创建一个简单的principal
+        headerAccessor.setUser(() -> sessionId);
+        log.debug("已设置用户principal: {}", sessionId);
+
         // 记录WebSocket连接日志
         logFileManager.logWebSocketConnection(sessionId, "unknown", "CONNECTED",
             "WebSocket连接建立，用户代理: " + headerAccessor.getNativeHeader("user-agent"));
@@ -89,6 +94,12 @@ public class WebSocketEventListener {
         String destination = headerAccessor.getDestination();
 
         log.debug("📡 客户端订阅 - Session ID: {}, 订阅主题: {}", sessionId, destination);
+
+        // ✅ 重要：在订阅时也设置用户principal，确保用户队列工作
+        if (destination != null && destination.contains("/user/queue")) {
+            log.debug("🔧 用户队列订阅检测到，设置用户principal: {}", sessionId);
+            headerAccessor.setUser(() -> sessionId);
+        }
 
         // 记录订阅日志
         logFileManager.logWebSocketConnection(sessionId, "unknown", "SUBSCRIBED",

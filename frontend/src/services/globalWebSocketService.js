@@ -31,6 +31,10 @@ let periodicReconnectInterval = null         // ✅ 新增：定期重连的间�
 let heartbeatInterval = null
 const maxMessageCallbacks = 100              // ✅ 新增：回调集合最大数量限制
 
+// 订阅状态跟踪
+let userQueueSubscribed = false
+let userQueueSubscription = null
+
 /**
  * 注册消息回调
  * @param {Function} callback - 回调函数，接收 (type, data) 两个参数
@@ -120,57 +124,81 @@ function subscribeToAllTopics() {
 
   logService.info('开始订阅所有主题')
 
+  // 重置订阅状态
+  userQueueSubscribed = false
+  userQueueSubscription = null
+
+  // ✅ 关键修复：订阅个人用户队列（必须先建立）
+  const userQueuePath = '/user/queue/messages'
+  logService.info('📡 订阅个人队列:', { path: userQueuePath })
+
+  try {
+    userQueueSubscription = globalStompClient.subscribe(userQueuePath, (message) => {
+      try {
+        logService.debug('📥 收到个人队列消息')
+        const data = JSON.parse(message.body)
+
+        // 如果是第一次收到个人队列消息，标记订阅成功
+        if (!userQueueSubscribed) {
+          userQueueSubscribed = true
+          logService.info('✅ 个人队列订阅已确认')
+        }
+
+        // 处理不同类型的消息
+        switch (data.type) {
+          case 'client_registered':
+          case 'client_registered_debug':
+            logService.info('✅ 收到注册成功消息', {
+              type: data.type,
+              clientId: data.data?.clientId
+            })
+            logService.event('CLIENT_REGISTERED', data.data)
+
+            // 更新全局连接状态
+            if (data.data?.success && data.data?.clientId) {
+              globalConnectionState.clientId = data.data.clientId
+              globalConnectionState.isRegistered = true
+              logService.info('✅ 客户端注册成功', { clientId: globalConnectionState.clientId })
+            } else if (data.clientId) {
+              // 调试消息可能直接包含clientId
+              globalConnectionState.clientId = data.clientId
+              globalConnectionState.isRegistered = true
+              logService.info('✅ 客户端注册成功（调试消息）', { clientId: globalConnectionState.clientId })
+            }
+
+            // 广播注册消息
+            broadcastMessage('registered', data.data || data)
+            break
+          case 'timer_state':
+            broadcastMessage('timer_state', data.data)
+            break
+          case 'error':
+            logService.error('服务器返回错误', data.data)
+            broadcastMessage('error', data.data)
+            break
+          default:
+            logService.debug('收到消息', { type: data.type })
+            broadcastMessage(data.type, data.data)
+        }
+      } catch (error) {
+        logService.error('解析个人队列消息失败', { error: error.message })
+      }
+    })
+    logService.info('✅ 个人队列订阅已创建')
+  } catch (error) {
+    logService.error('❌ 订阅个人队列失败', { error: error.message })
+  }
+
   // 订阅计时器状态（广播）
   globalStompClient.subscribe('/topic/timer-state', (message) => {
     try {
       const data = JSON.parse(message.body)
       const timerData = data.data || data
 
-      // ✅ 验证数据完整性
-      if (!validateTimerState(timerData)) {
-        logService.warn('收到无效的计时器状态数据', {
-          data: timerData,
-          missingFields: Object.keys(timerData).filter(k => !timerData[k])
-        })
-        return  // 丢弃这个消息
-      }
-
-      logService.debug('收到有效的计时器状态', {
-        status: timerData.status,
-        remaining: timerData.totalRemaining
-      })
+      logService.debug('📡 收到 /topic/timer-state 广播消息')
       broadcastMessage('timer_state', timerData)
     } catch (error) {
       logService.error('解析计时器状态失败', { error: error.message })
-    }
-  })
-
-  // 订阅个人队列消息
-  const userQueuePath = '/user/queue/messages'
-  globalStompClient.subscribe(userQueuePath, (message) => {
-    try {
-      const data = JSON.parse(message.body)
-      logService.debug('收到个人队列消息', { type: data.type })
-
-      // 处理不同类型的消息
-      switch (data.type) {
-        case 'client_registered':
-          logService.event('CLIENT_REGISTERED', data.data)
-          broadcastMessage('registered', data.data)
-          break
-        case 'timer_state':
-          broadcastMessage('timer_state', data.data)
-          break
-        case 'error':
-          logService.error('服务器返回错误', data.data)
-          broadcastMessage('error', data.data)
-          break
-        default:
-          logService.debug('收到消息', { type: data.type })
-          broadcastMessage(data.type, data.data)
-      }
-    } catch (error) {
-      logService.error('解析个人队列消息失败', { error: error.message })
     }
   })
 
@@ -178,21 +206,49 @@ function subscribeToAllTopics() {
   globalStompClient.subscribe('/topic/clients', (message) => {
     try {
       const data = JSON.parse(message.body)
-
-      // ✅ 简单验证：检查clients是否是数组
-      if (!Array.isArray(data?.clients)) {
-        logService.warn('收到无效的客户端状态', { data })
-        return
-      }
-
-      logService.debug('收到客户端状态', { clientCount: data.clients.length })
+      logService.debug('收到客户端状态', { clientCount: data.clients?.length })
       broadcastMessage('client_status', data)
     } catch (error) {
       logService.error('解析客户端状态失败', { error: error.message })
     }
   })
 
-  logService.info('所有主题订阅完成', { topicsCount: 3 })
+  // 订阅调试主题
+  globalStompClient.subscribe('/topic/debug', (message) => {
+    try {
+      const data = JSON.parse(message.body)
+      logService.debug('🔧 收到调试消息', { type: data.type })
+    } catch (error) {
+      logService.error('解析调试消息失败', { error: error.message })
+    }
+  })
+
+  logService.info('所有主题订阅完成')
+  logService.event('WEB_SOCKET_SUBSCRIPTIONS_COMPLETE', {
+    timestamp: new Date().toISOString()
+  })
+
+  // ✅ 关键：等待订阅完全生效后再注册
+  setTimeout(() => {
+    if (globalStompClient && globalStompClient.connected) {
+      logService.debug('📤 订阅已生效，现在发送注册请求')
+      const clientType = getClientTypeFromRoute()
+      const clientName = getClientName(clientType)
+
+      try {
+        globalStompClient.publish({
+          destination: '/app/register',
+          body: JSON.stringify({
+            clientType,
+            clientName
+          })
+        })
+        logService.info('✅ 客户端注册请求已发送', { clientType })
+      } catch (error) {
+        logService.error('发送注册请求失败', { error: error.message })
+      }
+    }
+  }, 100)  // 等待100ms确保订阅已建立
 }
 
 /**
@@ -226,9 +282,51 @@ export function initGlobalWebSocket() {
     return
   }
 
-  logService.info('初始化全局 WebSocket 连接')
+  logService.info('初始化全局 WebSocket 连接', {
+    endpoint: '/ws-archery-timer',
+    currentURL: window.location.href,
+    timestamp: new Date().toISOString()
+  })
 
-  const socket = new SockJS('/ws-archery-timer')
+  // 显示详细的连接信息
+  logService.event('WEBSOCKET_CONNECT_ATTEMPT', {
+    endpoint: '/ws-archery-timer',
+    origin: window.location.origin,
+    protocol: window.location.protocol,
+    host: window.location.host
+  })
+
+  // ✅ WebSocket URL 配置
+  // 开发环境：使用相对路径走 Vite 代理，vite.config.js 中配置了 /ws-archery-timer 到 http://localhost:8080
+  // 生产环境：直接使用相对路径
+  const wsUrl = '/ws-archery-timer'
+  logService.debug('WebSocket连接URL:', {
+    wsUrl,
+    currentHost: window.location.host,
+    origin: window.location.origin,
+    isDev: process.env.NODE_ENV === 'development'
+  })
+
+const socket = new SockJS(wsUrl)
+
+  // 添加socket事件监听器用于调试
+  socket.onopen = () => {
+    logService.debug('📡 [WS] SockJS连接已建立')
+  }
+  socket.onclose = (event) => {
+    logService.warn('📡 [WS] SockJS连接已关闭', {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean
+    })
+  }
+  socket.onerror = (error) => {
+    logService.error('📡 [WS] SockJS连接错误', {
+      error: error?.message || 'Unknown error',
+      type: error?.type
+    })
+  }
+
   const client = new Client({
     webSocketFactory: () => socket,
     reconnectDelay: 5000,
@@ -241,13 +339,13 @@ export function initGlobalWebSocket() {
       globalConnectionState.isConnected = true
       broadcastMessage('connected', null)
 
-      // 订阅所有主题
+      // 订阅所有主题（包括发送注册请求）
       subscribeToAllTopics()
 
       // 启动心跳
       startHeartbeat()
 
-      logService.info('WebSocket 连接就绪，开始心跳和广播')
+      // 广播 connection_ready
       broadcastMessage('connection_ready', null)
     },
     onDisconnect: () => {
@@ -308,18 +406,65 @@ export function initGlobalWebSocket() {
 export function disconnectGlobalWebSocket() {
   if (globalStompClient) {
     logService.info('断开 WebSocket 连接...')
-    stopHeartbeat()
 
-    // ✅ 清理定期重连
-    if (periodicReconnectInterval) {
-      clearInterval(periodicReconnectInterval)
-      periodicReconnectInterval = null
+    try {
+      // ✅ 立即记录日志，因为后续操作可能被中断
+      logService.event('WEBSOCKET_MANUAL_DISCONNECT', {
+        wasConnected: globalStompClient.connected,
+        clientId: globalConnectionState.clientId,
+        timestamp: new Date().toISOString()
+      })
+
+      // ✅ 停止心跳
+      stopHeartbeat()
+
+      // ✅ 清理定期重连
+      if (periodicReconnectInterval) {
+        clearInterval(periodicReconnectInterval)
+        periodicReconnectInterval = null
+        logService.debug('✅ 清理了定期重连定时器')
+      }
+
+      // ✅ 重置指数退避
+      reconnectAttempts = 0
+      exponentialBackoffMultiplier = 1
+
+      // ✅ 发送断开连接消息到日志（尽可能发送）
+      try {
+        if (globalStompClient.connected) {
+          globalStompClient.publish({
+            destination: '/app/disconnect',
+            body: JSON.stringify({
+              clientId: globalConnectionState.clientId,
+              clientType: globalConnectionState.clientType,
+              timestamp: Date.now(),
+              reason: 'manual_disconnect'
+            })
+          })
+          logService.debug('✅ 发送断开连接通知')
+        }
+      } catch (err) {
+        // 忽略发送失败
+      }
+
+      // ✅ 停用STOMP客户端
+      globalStompClient.deactivate()
+      logService.debug('✅ STOMP客户端已停用')
+
+      // ✅ 清理状态
+      globalStompClient = null
+      globalConnectionState.isConnected = false
+      globalConnectionState.isRegistered = false
+      globalConnectionState.clientId = null
+
+      logService.info('✅ WebSocket连接已手动断开')
+    } catch (error) {
+      logService.error('断开WebSocket连接时发生错误', { error: error.message })
+      // 即使出错，也强制清理
+      globalStompClient = null
+      globalConnectionState.isConnected = false
+      globalConnectionState.isRegistered = false
     }
-
-    globalStompClient.deactivate()
-    globalStompClient = null
-    globalConnectionState.isConnected = false
-    globalConnectionState.isRegistered = false
   }
 }
 
@@ -351,7 +496,14 @@ export function registerGlobalClient(clientType) {
       })
     })
     globalConnectionState.clientType = clientType
-    logService.info('客户端注册消息已发送', { clientType })
+    logService.info('客户端注册消息已发送', {
+      clientType,
+      clientName,
+      isConnected: globalStompClient.connected,
+      hasClientId: !!globalConnectionState.clientId,
+      isRegistered: globalConnectionState.isRegistered,
+      timestamp: new Date().toISOString()
+    })
     return true
   } catch (error) {
     logService.error('注册客户端失败', { clientType, error: error.message })

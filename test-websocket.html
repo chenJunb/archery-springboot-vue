@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Diagnostic Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .log { border: 1px solid #ccc; padding: 10px; height: 400px; overflow-y: auto; margin: 10px 0; background: #f5f5f5; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .info { color: blue; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket 诊断工具</h1>
+    <div>
+        <button onclick="connectWebSocket()">连接</button>
+        <button onclick="disconnectWebSocket()">断开</button>
+        <button onclick="sendRegistration()">发送注册</button>
+        <button onclick="clearLog()">清空日志</button>
+    </div>
+    <div class="log" id="log"></div>
+
+    <script>
+        let stompClient = null;
+        let sessionId = null;
+        let clientId = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = type;
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        function connectWebSocket() {
+            log('🔌 开始连接...', 'info');
+
+            const socket = new SockJS('http://localhost:8080/ws-archery-timer');
+            stompClient = Stomp.over(socket);
+
+            stompClient.connect({}, function(frame) {
+                log('✅ STOMP 连接成功', 'success');
+                log(`Frame: ${frame.command}`, 'info');
+
+                // 获取会话ID（从frame headers或其他地方）
+                log(`Headers: ${JSON.stringify(frame.headers)}`, 'info');
+
+                // 订阅个人队列
+                log('📡 订阅 /user/queue/messages...', 'info');
+                stompClient.subscribe('/user/queue/messages', function(message) {
+                    log(`✅ 收到个人队列消息:`, 'success');
+                    try {
+                        const data = JSON.parse(message.body);
+                        log(`类型: ${data.type}`, 'success');
+                        log(`内容: ${JSON.stringify(data, null, 2)}`, 'success');
+
+                        if (data.type === 'client_registered' || data.type === 'client_registered_debug') {
+                            clientId = data.data?.clientId || data.clientId;
+                            log(`📌 clientId: ${clientId}`, 'success');
+                        }
+                    } catch (e) {
+                        log(`解析失败: ${e.message}`, 'error');
+                    }
+                }, function(error) {
+                    log(`❌ 订阅错误: ${error}`, 'error');
+                });
+
+                // 订阅调试主题
+                log('📡 订阅 /topic/debug...', 'info');
+                stompClient.subscribe('/topic/debug', function(message) {
+                    log(`🔧 调试消息:`, 'warning');
+                    try {
+                        const data = JSON.parse(message.body);
+                        log(`${JSON.stringify(data, null, 2)}`, 'warning');
+                    } catch (e) {
+                        log(`解析失败: ${e.message}`, 'error');
+                    }
+                });
+
+                // 订阅计时器状态
+                log('📡 订阅 /topic/timer-state...', 'info');
+                stompClient.subscribe('/topic/timer-state', function(message) {
+                    log(`📊 计时器状态更新`, 'info');
+                });
+
+            }, function(error) {
+                log(`❌ 连接失败: ${error}`, 'error');
+            });
+        }
+
+        function sendRegistration() {
+            if (!stompClient || !stompClient.connected) {
+                log('❌ 未连接，无法发送', 'error');
+                return;
+            }
+
+            log('📤 发送注册请求...', 'info');
+            stompClient.send('/app/register', {}, JSON.stringify({
+                clientType: 'control',
+                clientName: '测试控制端'
+            }));
+        }
+
+        function disconnectWebSocket() {
+            if (stompClient) {
+                stompClient.disconnect(function() {
+                    log('✅ 已断开', 'success');
+                });
+            }
+        }
+    </script>
+</body>
+</html>

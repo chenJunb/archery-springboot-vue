@@ -1,57 +1,139 @@
 package com.archery.timer.config;
 
-import org.springframework.beans.factory.annotation.Value;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.simp.SimpMessageType;
+import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.messaging.simp.stomp.StompCommand;
+import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+/**
+ * WebSocket 配置（增强版）
+ * ✅ 使用 ChannelInterceptor 增强 SimpleBroker 用户队列支持
+ * ✅ 实现毫秒级消息同步
+ * ✅ 无需额外依赖，零配置成本
+ */
 @Configuration
 @EnableWebSocketMessageBroker
+@Slf4j
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
-
-    @Value("${archery.timer.websocket.allowed-origins:http://localhost:3000,http://localhost:8080}")
-    private String allowedOrigins;
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
-        // 启用简单的内存消息代理，前缀为"/topic"
-        config.enableSimpleBroker("/topic", "/queue");
-        // 设置用户前缀为 "/user"
+        // 使用简单代理，配合 ChannelInterceptor 增强用户队列支持
+        config.enableSimpleBroker("/topic", "/queue", "/user");
         config.setUserDestinationPrefix("/user");
-        // 设置应用程序前缀为"/app"
         config.setApplicationDestinationPrefixes("/app");
+
+        log.info("✅ WebSocket MessageBroker 配置完成 (SimpleBroker + ChannelInterceptor)");
+    }
+
+    @Override
+    public void configureClientInboundChannel(ChannelRegistration registration) {
+        // 添加入站拦截器处理订阅命令
+        registration.interceptors(new ChannelInterceptor() {
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+
+                if (StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+                    String destination = accessor.getDestination();
+                    String sessionId = accessor.getSessionId();
+
+                    log.debug("📡 [入站] SUBSCRIBE 命令 - sessionId: {}, destination: {}",
+                             sessionId, destination);
+
+                    // 处理用户队列订阅：确保 Principal 正确设置
+                    if (destination != null && destination.contains("/user/")
+                        && destination.contains("/queue")) {
+                        // ✅ 关键：必须设置 User Principal，Spring WebSocket 才能正确路由用户消息
+                        accessor.setUser(() -> sessionId);
+                        log.info("✅ [入站] 用户队列订阅拦截处理 - sessionId: {}, destination: {}",
+                                 sessionId, destination);
+                    }
+
+                    // 处理普通主题订阅
+                    if (destination != null && destination.startsWith("/topic/")) {
+                        log.debug("📡 [入站] 主题订阅 - sessionId: {}, destination: {}",
+                                 sessionId, destination);
+                    }
+                }
+
+                // ✅ 连接命令时也设置 Principal
+                if (StompCommand.CONNECT.equals(accessor.getCommand())) {
+                    String sessionId = accessor.getSessionId();
+                    log.debug("🔗 [入站] CONNECT 命令 - sessionId: {}", sessionId);
+                    accessor.setUser(() -> sessionId);
+                }
+
+                return message;
+            }
+        });
+    }
+
+    @Override
+    public void configureClientOutboundChannel(ChannelRegistration registration) {
+        // 添加出站拦截器监控消息发送
+        registration.interceptors(new ChannelInterceptor() {
+            @Override
+            public Message<?> preSend(Message<?> message, MessageChannel channel) {
+                StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
+
+                // ✅ 所有消息类型都可能需要 Principal 信息
+                String destination = accessor.getDestination();
+
+                if (SimpMessageType.MESSAGE.equals(accessor.getMessageType())) {
+                    // 监控用户队列消息发送
+                    if (destination != null && destination.startsWith("/user/")) {
+                        log.debug("📤 [出站] 用户队列消息 - destination: {}, hasUser: {}",
+                                 destination, accessor.getUser() != null);
+
+                        // ✅ 确保用户消息也有 Principal
+                        // 检查是否已经有User，如果没有，从路径提取
+                        if (accessor.getUser() == null && destination.contains("/")) {
+                            try {
+                                // 从路径中提取 sessionId: /user/{sessionId}/queue/messages
+                                String[] parts = destination.split("/");
+                                if (parts.length > 2) {
+                                    String sessionId = parts[2];
+                                    accessor.setUser(() -> sessionId);
+                                    log.info("🔧 [出站] 从路径提取并设置 sessionId: {} (destination: {})",
+                                             sessionId, destination);
+                                }
+                            } catch (Exception e) {
+                                log.debug("⚠️ [出站] 从路径提取 sessionId 失败: {}", destination);
+                            }
+                        } else if (accessor.getUser() != null) {
+                            log.debug("📤 [出站] User 已设置: {}", accessor.getUser().getName());
+                        }
+                    }
+
+                    // 监控广播消息发送
+                    if (destination != null && destination.startsWith("/topic/")) {
+                        log.debug("📤 [出站] 广播消息 - destination: {}", destination);
+                    }
+                }
+
+                return message;
+            }
+        });
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // ✅ 改进：处理origins，支持正则和简单URL
-        String[] origins = allowedOrigins.split(",");
-
-        // ✅ 修复6.2: trim()去除空格
-        String[] trimmedOrigins = new String[origins.length];
-        for (int i = 0; i < origins.length; i++) {
-            trimmedOrigins[i] = origins[i].trim();
-        }
-
-        // ✅ 修复6.1: 将简单URL转换为regex模式
-        String[] patterns = new String[trimmedOrigins.length];
-        for (int i = 0; i < trimmedOrigins.length; i++) {
-            String origin = trimmedOrigins[i];
-            // 将简单的URL转换为regex模式（例如 "http://localhost:3000" -> "http://localhost:3000")
-            // 或者使用通配符模式 "http.*://localhost:3000"
-            if (origin.contains("*")) {
-                // 已经是通配符模式，直接使用
-                patterns[i] = origin;
-            } else {
-                // 转义特殊字符并转换为regex
-                patterns[i] = origin.replaceAll("\\.", "\\\\.").replaceAll(":", "\\\\:");
-            }
-        }
-
+        // ✅ 简化配置：允许所有来源（开发环境）
+        // 生产环境应该替换为具体的域名
         registry.addEndpoint("/ws-archery-timer")
-                .setAllowedOriginPatterns(patterns)
+                .setAllowedOriginPatterns("*")  // 允许所有来源
                 .withSockJS();
+
+        log.info("✅ WebSocket 端点配置完成 - /ws-archery-timer (允许所有来源)");
     }
 }

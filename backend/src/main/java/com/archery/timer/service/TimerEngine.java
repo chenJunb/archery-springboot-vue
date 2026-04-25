@@ -40,7 +40,7 @@ public class TimerEngine {
     private EnhancedMatchTypeDTO currentEnhancedMatchType;
     private MatchTypeDTO currentMatchType;
 
-    private ScheduledExecutorService timerScheduler;
+    private volatile ScheduledExecutorService timerScheduler;  // ✅ volatile: 确保多线程可见性
     private long timerStartedAt;
     private long lastUpdateAt;
     private boolean isTimerRunning = false;
@@ -48,7 +48,7 @@ public class TimerEngine {
 
     // 用于AB交替模式的标志
     private boolean isAScreenActive = true;
-    private long screenElapsedAtSwitch = 0;
+    private volatile long screenElapsedAtSwitch = 0;  // ✅ volatile: 屏幕切换时间戳在多线程中使用
 
     // AB交替模式下的屏幕计时器状态
     private long screenATimerPausedAt = 0;    // A屏暂停时的时间戳
@@ -96,7 +96,14 @@ public class TimerEngine {
         }
 
         this.currentEnhancedMatchType = enhancedMatchType;
+        // ✅ 修复：检查 convertToLegacyFormat 的返回值可能为 null
         this.currentMatchType = matchTypeConfigService.convertToLegacyFormat(enhancedMatchType);
+        if (this.currentMatchType == null) {
+            log.error("❌ 比赛类型转换失败: {}", matchTypeId);
+            logFileManager.logError("system", "system", "SELECT_MATCH_TYPE",
+                "比赛类型转换失败: " + matchTypeId, null);
+            return;
+        }
 
         // 记录比赛类型选择
         logFileManager.logClientAction("system", "system", "SELECT_MATCH_TYPE", matchTypeId);
@@ -675,43 +682,46 @@ public class TimerEngine {
      * ✅ 改进：检查executor状态，避免在已关闭的executor上调度任务
      */
     private void startTimerTask() {
-        // ✅ 改进：如果scheduler已在运行，直接返回（不需要重新启动）
-        if (timerScheduler != null && !timerScheduler.isShutdown()) {
-            log.debug("⚠️ 定时任务已在运行，跳过重复启动");
-            return;
-        }
+        // ✅ 修复：使用同步块确保竞态条件安全
+        synchronized (this) {
+            // ✅ 检查：如果scheduler已在运行，直接返回（不需要重新启动）
+            if (timerScheduler != null && !timerScheduler.isShutdown()) {
+                log.debug("⚠️ 定时任务已在运行，跳过重复启动");
+                return;
+            }
 
-        // ✅ 停止旧的scheduler（如果存在）
-        if (timerScheduler != null) {
-            stopTimerTaskNow();
-        }
+            // ✅ 停止旧的scheduler（如果存在）
+            if (timerScheduler != null) {
+                stopTimerTaskNow();
+            }
 
-        // ✅ 创建新的executor
-        timerScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "TimerEngine-ScheduledTask");
-            thread.setDaemon(false);
-            return thread;
-        });
+            // ✅ 创建新的executor
+            timerScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "TimerEngine-ScheduledTask");
+                thread.setDaemon(false);
+                return thread;
+            });
 
-        // ✅ 检查executor是否可用
-        if (timerScheduler == null || timerScheduler.isShutdown()) {
-            log.error("❌ 计时器调度器创建失败或已关闭，无法启动定时任务");
-            return;
-        }
+            // ✅ 检查executor是否可用
+            if (timerScheduler == null || timerScheduler.isShutdown()) {
+                log.error("❌ 计时器调度器创建失败或已关闭，无法启动定时任务");
+                return;
+            }
 
-        // ✅ 安全地调度任务
-        try {
-            timerScheduler.scheduleAtFixedRate(() -> {
-                try {
-                    updateTimerState();
-                } catch (Exception e) {
-                    log.error("定时任务执行异常", e);
-                }
-            }, 0, broadcastInterval, TimeUnit.MILLISECONDS);
-            log.debug("✅ 定时任务已启动，广播间隔: {}ms", broadcastInterval);
-        } catch (RejectedExecutionException e) {
-            log.error("❌ 计时器调度器已关闭，无法调度任务", e);
-        }
+            // ✅ 安全地调度任务
+            try {
+                timerScheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        updateTimerState();
+                    } catch (Exception e) {
+                        log.error("定时任务执行异常", e);
+                    }
+                }, 0, broadcastInterval, TimeUnit.MILLISECONDS);
+                log.debug("✅ 定时任务已启动，广播间隔: {}ms", broadcastInterval);
+            } catch (RejectedExecutionException e) {
+                log.error("❌ 计时器调度器已关闭，无法调度任务", e);
+            }
+        }  // synchronized 块结束
     }
 
     /**

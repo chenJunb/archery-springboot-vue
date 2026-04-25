@@ -61,8 +61,10 @@ public class EnhancedWebSocketController {
     public void registerClient(Map<String, Object> payload, org.springframework.messaging.Message<?> message) {
         SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(message);
         String sessionId = headerAccessor.getSessionId();
-        String clientType = (String) payload.get("clientType");
-        String clientName = (String) payload.get("clientName");
+
+        // ✅ 改进：验证参数类型和内容
+        String clientType = validateAndGetString(payload, "clientType", "control");
+        String clientName = validateAndGetString(payload, "clientName", "unknown");
 
         // ✅ 添加详细调试日志
         log.info("📨 收到客户端注册请求 - sessionId: {}, clientType: {}, clientName: {}",
@@ -70,9 +72,15 @@ public class EnhancedWebSocketController {
         log.debug("📨 注册请求详情 - sessionId: {}, hasSessionId: {}, messageHeaders: {}",
             sessionId, sessionId != null, headerAccessor.getMessageHeaders());
 
-        // ✅ 验证sessionId不为空
-        if (sessionId == null || sessionId.isEmpty()) {
-            log.error("❌ 客户端注册失败：sessionId为空");
+        // ✅ 验证sessionId不为空且长度合理
+        if (sessionId == null || sessionId.isEmpty() || sessionId.length() > 256) {
+            log.error("❌ 客户端注册失败：sessionId无效");
+            return;
+        }
+
+        // ✅ 验证clientType在允许范围内
+        if (!isValidClientType(clientType)) {
+            log.error("❌ 客户端注册失败：clientType不合法 - {}", clientType);
             return;
         }
 
@@ -689,5 +697,39 @@ public class EnhancedWebSocketController {
         TimerStateDTO state = timerEngine.getState();
         messagingTemplate.convertAndSend("/topic/timer-state", state);
         return state;
+    }
+
+    /**
+     * ✅ 参数验证辅助方法：安全获取字符串
+     */
+    private String validateAndGetString(Map<String, Object> payload, String key, String defaultValue) {
+        Object value = payload.get(key);
+        if (value instanceof String) {
+            String strValue = (String) value;
+            // 验证长度
+            if (strValue.length() > 256) {
+                log.warn("⚠️ 参数 {} 超过最大长度，使用默认值", key);
+                return defaultValue;
+            }
+            // 验证不包含危险字符
+            if (strValue.contains("<") || strValue.contains(">") || strValue.contains("\"") || strValue.contains("'")) {
+                log.warn("⚠️ 参数 {} 包含危险字符，使用默认值", key);
+                return defaultValue;
+            }
+            return strValue;
+        }
+        log.debug("⚠️ 参数 {} 类型不正确或为null，使用默认值: {}", key, defaultValue);
+        return defaultValue;
+    }
+
+    /**
+     * ✅ 验证clientType是否合法
+     */
+    private boolean isValidClientType(String clientType) {
+        if (clientType == null) {
+            return false;
+        }
+        // 允许的客户端类型列表
+        return clientType.equals("control") || clientType.equals("display-a") || clientType.equals("display-b");
     }
 }

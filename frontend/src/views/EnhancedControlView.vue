@@ -618,7 +618,11 @@ const fetchEnhancedMatchTypes = async () => {
         if (enhancedMatchTypes.value.length > 0) {
           selectedMatchType.value = enhancedMatchTypes.value[0].id
           currentMatchType.value = enhancedMatchTypes.value[0]
-          loadMatchTypeConfig(enhancedMatchTypes.value[0])
+
+          // ✅ 只有在连接已建立时才立即配置，否则等待watch触发
+          if (timerStore.connectionState.isConnected) {
+            loadMatchTypeConfig(enhancedMatchTypes.value[0])
+          }
         }
       }
     }
@@ -711,7 +715,10 @@ const resetABScreenState = () => {
 }
 
 const updateTimeConfig = () => {
-  if (!timerStore.connectionState.isConnected) return
+  if (!timerStore.connectionState.isConnected) {
+    logService.warn('📡 [Control] WebSocket未连接，无法发送时间配置')
+    return
+  }
 
   // ✅ 严格遵循"后端单一数据源"原则
   // 步骤1：发送原始用户输入给后端（无任何计算）
@@ -721,7 +728,19 @@ const updateTimeConfig = () => {
     yellowLight: yellowLightTime.value
   }
 
-  logService.debug('发送时间配置给后端（原始值）', config)
+  logService.debug('📡 [Control] 发送时间配置给后端（原始值）', {
+    config,
+    clientId: timerStore.connectionState.clientId,
+    timestamp: new Date().toISOString()
+  })
+
+  logService.event('TIME_CONFIG_SENT', {
+    preparation: preparationTime.value,
+    competition: competitionTime.value,
+    yellowLight: yellowLightTime.value,
+    destination: 'timer/set-time-config'
+  })
+
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
   // 步骤2：等待后端处理并广播完整状态
@@ -746,7 +765,19 @@ const onTimeConfigBlur = () => {
     yellowLight: yellowLightTime.value
   }
 
-  logService.debug('失焦时发送时间配置给后端', config)
+  logService.debug('📡 [Control] 失焦时发送时间配置给后端', {
+    config,
+    clientId: timerStore.connectionState.clientId,
+    timestamp: new Date().toISOString()
+  })
+
+  logService.event('TIME_CONFIG_BLUR_SENT', {
+    preparation: preparationTime.value,
+    competition: competitionTime.value,
+    yellowLight: yellowLightTime.value,
+    trigger: 'blur'
+  })
+
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
   // ✅ 不调用 syncTimeConfigToPreview
@@ -875,6 +906,32 @@ watch(() => timerState, (newState) => {
   // 预览显示由 timerState 驱动，但用户输入框保持用户最新输入的值
 }, { immediate: false })
 
+// 跟踪是否已发送 selectMatchType 消息
+let matchTypeConfigSent = false
+
+// ✅ 监听连接状态，当连接建立时如果还未发送比赛类型配置则发送
+watch(() => timerStore.connectionState.isConnected, (isConnected) => {
+  if (isConnected && enhancedMatchTypes.value.length > 0 && !matchTypeConfigSent) {
+    logService.debug('✅ 连接已建立，发送比赛类型配置', {
+      matchTypeId: selectedMatchType.value || enhancedMatchTypes.value[0].id,
+      matchTypeName: currentMatchType.value?.chineseName || enhancedMatchTypes.value[0].chineseName
+    })
+
+    // 确保有选中的比赛类型
+    if (!selectedMatchType.value) {
+      selectedMatchType.value = enhancedMatchTypes.value[0].id
+      currentMatchType.value = enhancedMatchTypes.value[0]
+    }
+
+    // 发送配置到后端
+    if (currentMatchType.value) {
+      loadMatchTypeConfig(currentMatchType.value)
+    }
+
+    matchTypeConfigSent = true
+  }
+}, { immediate: false })
+
 
 // 生命周期
 onMounted(() => {
@@ -903,6 +960,8 @@ onMounted(() => {
 
 onUnmounted(() => {
   // 清理资源
+  timerStore.cleanup()
+  logService.debug('🔧 EnhancedControlView组件卸载，清理资源完成')
 })
 
 const subscribeToTopics = () => {
