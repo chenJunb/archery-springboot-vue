@@ -429,12 +429,32 @@ export function useEnhancedTimerStore() {
     unsubscribeCallbacks.forEach(cb => cb?.unsubscribe?.())
     unsubscribeCallbacks.length = 0
 
+    // ✅ 验证连接状态
+    if (!globalConnectionState.isConnected) {
+      logService.error('❌ 无法订阅主题：WebSocket 未连接', {
+        isConnected: globalConnectionState.isConnected
+      })
+      return
+    }
+
     // ✅ 修复：订阅并存储unsubscribe函数
     // 订阅计时器状态
     const sub1 = subscribeToTopic('/topic/timer-state', (data) => {
+      logService.debug('📥 收到后端广播的计时器状态', {
+        preparationTime: data.preparationTime,
+        competitionTime: data.competitionTime,
+        currentStageRemaining: data.currentStageRemaining
+      })
+      // ✅ 无条件接收后端状态（后端单一数据源原则）
       Object.assign(timerState, data)
     })
-    if (sub1) unsubscribeCallbacks.push(sub1)
+
+    if (!sub1) {
+      logService.error('❌ 订阅 /topic/timer-state 失败')
+    } else {
+      unsubscribeCallbacks.push(sub1)
+      logService.info('✅ 已订阅 /topic/timer-state')
+    }
 
     // 订阅比赛类型
     const sub2 = subscribeToTopic('/topic/match-types', (data) => {
@@ -463,11 +483,19 @@ export function useEnhancedTimerStore() {
     })
     if (sub5) unsubscribeCallbacks.push(sub5)
 
-    logService.debug(`✅ 已订阅 ${unsubscribeCallbacks.length} 个主题`)
+    logService.info(`✅ 已成功订阅 ${unsubscribeCallbacks.length} 个主题`, {
+      successCount: unsubscribeCallbacks.length,
+      totalAttempted: 5
+    })
   }
 
-  // 广播状态请求
+  // 广播状态请求（主动拉取最新状态）
   const requestBroadcastState = () => {
+    if (!globalConnectionState.isConnected) {
+      logService.warn('未连接，无法请求状态')
+      return
+    }
+    logService.debug('📡 请求后端广播当前状态...')
     sendGlobalWebSocketMessage('timer/broadcast-state', {})
   }
 

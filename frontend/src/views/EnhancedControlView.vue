@@ -884,8 +884,21 @@ onMounted(() => {
   // 获取比赛类型
   fetchEnhancedMatchTypes()
 
-  // 订阅WebSocket主题
-  subscribeToTopics()
+  // ✅ 等待连接建立后再订阅WebSocket主题
+  const checkAndSubscribe = () => {
+    if (timerStore.connectionState.isConnected) {
+      logService.debug('✅ WebSocket 已连接，立即订阅主题')
+      subscribeToTopics()
+
+      // ✅ 主动请求后端广播当前状态
+      // 确保加载时能立即显示最新的时间配置
+      timerStore.requestBroadcastState()
+    } else {
+      logService.debug('⏳ 等待 WebSocket 连接建立...')
+      setTimeout(checkAndSubscribe, 500)
+    }
+  }
+  checkAndSubscribe()
 })
 
 onUnmounted(() => {
@@ -894,18 +907,17 @@ onUnmounted(() => {
 
 const subscribeToTopics = () => {
   if (!timerStore.connectionState.isConnected) {
-    logService.debug('未连接到WebSocket，无法订阅主题，将在连接后自动订阅')
+    logService.warn('未连接到WebSocket，无法订阅主题')
     return
   }
 
-  // 订阅计时器状态更新
-  if (timerStore.subscribe && typeof timerStore.subscribe === 'function') {
-    timerStore.subscribe('timer_state', (data) => {
-      logService.debug('收到计时器状态更新', data)
-    })
+  // ✅ 确认订阅成功
+  try {
+    timerStore.subscribeToTopics()
+    logService.info('✅ 已成功订阅所有 WebSocket 主题')
+  } catch (error) {
+    logService.error('订阅主题失败', { error: error.message })
   }
-
-  logService.debug('✅ WebSocket主题订阅完成')
 }
 </script>
 

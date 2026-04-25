@@ -308,8 +308,22 @@ onMounted(() => {
   // 自动连接
   timerStore.autoConnect()
 
-  // 订阅主题
-  timerStore.subscribeToTopics()
+  // ✅ 等待连接建立后再订阅主题
+  // 原因：subscribeToTopics() 需要 WebSocket 已连接
+  const checkAndSubscribe = () => {
+    if (timerStore.connectionState.isConnected) {
+      logService.debug('✅ WebSocket 已连接，立即订阅主题')
+      timerStore.subscribeToTopics()
+
+      // ✅ 主动请求后端广播当前状态
+      // 确保页面加载时能立即显示最新的时间配置
+      timerStore.requestBroadcastState()
+    } else {
+      logService.debug('⏳ 等待 WebSocket 连接建立...')
+      setTimeout(checkAndSubscribe, 500)  // 每500ms检查一次
+    }
+  }
+  checkAndSubscribe()
 
   // 监听连接状态
   initializeConnection()
