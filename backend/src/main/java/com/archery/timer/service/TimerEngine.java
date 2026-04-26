@@ -303,7 +303,20 @@ public class TimerEngine {
         // 停止定时任务
         stopTimerTask();
 
-        log.info("暂停计时");
+        // ✅ 改进：暂停时也需要更新AB屏的独立系统状态
+        // 计算当前的经过时间
+        long now = System.currentTimeMillis();
+        long totalElapsed = now - timerStartedAt;
+        int totalElapsedSeconds = (int) (totalElapsed / 1000);
+
+        // 更新全局阶段信息
+        updateCurrentStage(totalElapsedSeconds);
+
+        // 更新AB屏的独立阶段信息
+        calculateScreenStage("A", totalElapsedSeconds);
+        calculateScreenStage("B", totalElapsedSeconds);
+
+        log.info("暂停计时 - 已更新当前AB屏状态");
         notifyStateChange();
     }
 
