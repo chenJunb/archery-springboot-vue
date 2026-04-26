@@ -137,6 +137,9 @@ function stopLocalCountdown() {
     clearInterval(localCountdownInterval)
     localCountdownInterval = null
   }
+  // ✅ 关键修复：停止本地倒计时时，同时重置localDisplayRemaining为0
+  // 否则归零后会显示0和1之间的浮点数，导致数字反复跳动
+  timerState.localDisplayRemaining = 0
 }
 
 // 初始化消息监听
@@ -783,9 +786,13 @@ export function useEnhancedTimerStore() {
 
   // 获取显示用的剩余时间 - 用于前端实时显示
   const getDisplayRemaining = () => {
+    // ✅ 修复：计时器停止时直接返回后端的值，不使用本地计时
+    // 否则会出现0和1之间反复跳动的问题
     if (timerState.status === 'running' && timerState.localDisplayRemaining > 0) {
       return timerState.localDisplayRemaining
     }
+    // 计时器停止/暂停/完成时，使用后端的currentStageRemaining
+    // 此时localDisplayRemaining已被重置为0，所以这里返回的是可靠的
     return timerState.currentStageRemaining || 0
   }
 
