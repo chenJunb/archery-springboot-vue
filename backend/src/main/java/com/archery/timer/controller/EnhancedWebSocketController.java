@@ -423,6 +423,10 @@ public class EnhancedWebSocketController {
             }
         }
 
+        // ✅ 新增：如果正在运行并且处于比赛阶段，也需要重新计算剩余时间
+        // 但由于阶段计算在updateTimerTask中进行，这里暂不修改
+        // 下一次updateTimerTask会根据新的配置重新计算
+
         // 获取更新后的完整状态进行广播
         TimerStateDTO updatedState = timerEngine.getState();
         updatedState.setTimestamp(System.currentTimeMillis());

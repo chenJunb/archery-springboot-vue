@@ -717,13 +717,28 @@ public class TimerEngine {
         // 更新阶段信息
         currentState.setCurrentStageIndex(currentStageIndex);
         currentState.setCurrentStageName(currentStage.getName());
-        currentState.setCurrentStageDuration(currentStage.getDuration());
+
+        // ✅ 关键修复：currentStageDuration 也应该使用配置的值而不是默认值
+        // 重新获取这个阶段的实际时长
+        int actualStageDuration = currentStage.getDuration();
+        if (currentStageIndex == 0) {
+            Integer prepTime = currentState.getPreparationTime();
+            if (prepTime != null) {
+                actualStageDuration = prepTime;
+            }
+        } else if (currentStageIndex == 1) {
+            Integer compTime = currentState.getCompetitionTime();
+            if (compTime != null) {
+                actualStageDuration = compTime;
+            }
+        }
+        currentState.setCurrentStageDuration(actualStageDuration);
         currentState.setCurrentStageElapsed(stageElapsed);
         currentState.setCurrentStageRemaining(stageRemaining);
         currentState.setCurrentStageColor(stageColor);
 
-        log.debug("[阶段更新] 状态已更新 - 阶段索引: {}, 名称: {}, 颜色: {}, 剩余时间: {}秒",
-                currentStageIndex, currentStage.getName(), stageColor, stageRemaining);
+        log.debug("[阶段更新] 状态已更新 - 阶段索引: {}, 名称: {}, 颜色: {}, 阶段时长: {}秒, 剩余时间: {}秒",
+                currentStageIndex, currentStage.getName(), stageColor, actualStageDuration, stageRemaining);
 
         // 保存当前状态用于下一次检测
         previousStageIndex = currentStageIndex;
