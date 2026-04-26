@@ -521,9 +521,10 @@ public class TimerEngine {
             return;
         }
 
-        // ✅ 第二层检查：运行状态和比赛类型检查
-        if (!isTimerRunning) {
-            log.warn("计时器未运行，无法切换屏幕");
+        // ✅ 改进：允许在计时结束（finished）后切换屏幕，这样可以继续用另一个屏幕进行下一轮
+        // 原逻辑只检查isTimerRunning，当A屏倒计时结束导致计时器停止时，就无法切换到B屏了
+        if (!isTimerRunning && !"finished".equals(currentState.getStatus())) {
+            log.warn("计时器未运行且未结束，无法切换屏幕");
             return;
         }
 
@@ -553,6 +554,50 @@ public class TimerEngine {
             log.debug("保存B屏剩余时间: {}秒", screenBTimerRemaining);
         }
 
+        // ✅ 改进：计时结束（finished状态）时的特殊处理
+        // 此时计时器已停止（isTimerRunning=false），无法再计算经过时间
+        // 应该直接将新屏幕重置为初始时间并继续运行
+        if ("finished".equals(currentState.getStatus())) {
+            log.info("计时已结束，切换屏幕到新屏幕进行下一轮 {} -> {}", currentScreen, newScreen);
+
+            // 恢复计时器运行状态（继续下一轮）
+            isTimerRunning = true;
+            isTimerPaused = false;
+            currentState.setStatus("running");
+            timerStartedAt = now;
+            lastUpdateAt = now;
+            screenElapsedAtSwitch = now;
+
+            // 重置两个屏幕的初始状态
+            if ("individual".equals(currentEnhancedMatchType.getCategory()) ||
+                "individual_alternate".equals(currentEnhancedMatchType.getAlternateType())) {
+                // 个人赛：新屏从竞赛时间开始，原屏清零
+                if ("A".equals(newScreen)) {
+                    screenATimerRemaining = currentState.getCompetitionTime();
+                    screenATimerPausedAt = 0;
+                    screenBTimerRemaining = 0;
+                    screenBTimerPausedAt = now;
+                    log.info("个人赛重新开始: 切换到A屏({}秒)，B屏清零", currentState.getCompetitionTime());
+                } else {
+                    screenBTimerRemaining = currentState.getCompetitionTime();
+                    screenBTimerPausedAt = 0;
+                    screenATimerRemaining = 0;
+                    screenATimerPausedAt = now;
+                    log.info("个人赛重新开始: 切换到B屏({}秒)，A屏清零", currentState.getCompetitionTime());
+                }
+            } else {
+                // 团队赛：两个屏幕都恢复为竞赛初始时间
+                screenATimerRemaining = currentState.getCompetitionTime();
+                screenBTimerRemaining = currentState.getCompetitionTime();
+                screenATimerPausedAt = 0;
+                screenBTimerPausedAt = 0;
+                log.info("团队赛重新开始: 两个屏幕都恢复到{}秒", currentState.getCompetitionTime());
+            }
+
+            // 启动新的计时任务
+            startTimerTask();
+        }
+
         // ✅ 第四层检查：比赛类型信息检查
         String category = currentEnhancedMatchType.getCategory();
         String alternateType = currentEnhancedMatchType.getAlternateType();
@@ -563,6 +608,13 @@ public class TimerEngine {
         }
 
         boolean isIndividual = "individual".equals(category) || "individual_alternate".equals(alternateType);
+
+        // ✅ 改进：只在计时器仍在运行时才应用切换规则
+        // 计时结束的情况已在上面处理过了
+        if (!isTimerRunning) {
+            log.warn("计时器已停止，无法继续应用切换规则");
+            return;
+        }
 
         // 3. 应用切换规则
         if (isIndividual) {
@@ -585,7 +637,7 @@ public class TimerEngine {
                     currentState.getCompetitionTime());
             }
         } else {
-            // 团队赛/混团规则: 原屏暂停保留时间，新屏继续倒计时
+            // ✅ 团队赛/混团规则: 切换屏幕时，原屏暂停保留时间，新屏继续倒计时
             if ("A".equals(newScreen)) {
                 // 切换到A屏
                 screenATimerPausedAt = 0;             // A屏继续运行
@@ -689,10 +741,24 @@ public class TimerEngine {
                 currentState.getCurrentStageIndex(), currentState.getCurrentStageName(),
                 currentState.getCurrentStageColor());
 
-        // ✅ 改进：所有屏幕模式下都计算A屏和B屏的独立系统
-        // 这样无论选择什么模式，后端都提供完整的独立屏幕数据
-        calculateScreenStage("A", totalElapsedSecondsInt);
-        calculateScreenStage("B", totalElapsedSecondsInt);
+        // ✅ 改进：只有在非交替模式或对应屏幕活跃时，才计算该屏幕的独立系统
+        // 交替模式下：只计算活跃屏幕，非活跃屏幕保持其初始/暂停状态
+        boolean isAlternateMode = "alternate".equals(currentState.getAbMode());
+
+        if (!isAlternateMode) {
+            // 非交替模式下：无条件计算两个屏幕（都显示相同内容）
+            calculateScreenStage("A", totalElapsedSecondsInt);
+            calculateScreenStage("B", totalElapsedSecondsInt);
+        } else {
+            // 交替模式下：只计算活跃屏幕，保护非活跃屏幕的状态
+            if (isAScreenActive) {
+                calculateScreenStage("A", totalElapsedSecondsInt);
+                // B屏不计算，保持其之前的状态（初始绿灯时间或暂停时的状态）
+            } else {
+                calculateScreenStage("B", totalElapsedSecondsInt);
+                // A屏不计算，保持其之前的状态（初始绿灯时间或暂停时的状态）
+            }
+        }
 
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {
