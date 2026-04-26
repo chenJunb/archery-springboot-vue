@@ -546,7 +546,7 @@ public class TimerEngine {
 
         // ✅ 关键修复：使用currentState中的总时间，而不是currentMatchType的默认值
         // 这样才能正确使用用户修改后的时间配置
-        Integer configuredTotalTime = currentState.getTotalRemaining() + totalElapsedSecondsInt;
+        Integer configuredTotalTime = currentState.getTotalRemaining();
         int totalRemainingSeconds = Math.max(0, configuredTotalTime - totalElapsedSecondsInt);
 
         // ✅ 修复：添加详细日志记录进度
