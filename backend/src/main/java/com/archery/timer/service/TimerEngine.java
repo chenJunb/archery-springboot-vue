@@ -180,6 +180,27 @@ public class TimerEngine {
             this.currentState.setCurrentStageDuration(stageDuration);
             this.currentState.setCurrentStageElapsed(0);
             this.currentState.setCurrentStageRemaining(stageDuration);
+
+            // ✅ 新增：初始化AB屏的独立阶段信息为第一阶段（准备）
+            this.currentState.setScreenAStageIndex(0);
+            this.currentState.setScreenAStageName(firstStage.getName());
+            this.currentState.setScreenAStageColor(firstStage.getColor());
+            this.currentState.setScreenAStageDuration(stageDuration);
+            this.currentState.setScreenAStageElapsed(0);
+            this.currentState.setScreenAStageRemaining(stageDuration);
+
+            this.currentState.setScreenBStageIndex(0);
+            this.currentState.setScreenBStageName(firstStage.getName());
+            this.currentState.setScreenBStageColor(firstStage.getColor());
+            this.currentState.setScreenBStageDuration(stageDuration);
+            this.currentState.setScreenBStageElapsed(0);
+            this.currentState.setScreenBStageRemaining(stageDuration);
+
+            // ✅ 重置AB屏的阶段追踪
+            screenAPreviousStageIndex = -1;
+            screenAWasYellowLight = false;
+            screenBPreviousStageIndex = -1;
+            screenBWasYellowLight = false;
         }
 
         // 重置阶段切换跟踪
