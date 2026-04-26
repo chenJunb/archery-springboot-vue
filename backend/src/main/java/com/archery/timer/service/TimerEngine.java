@@ -287,6 +287,13 @@ public class TimerEngine {
         previousStageIndex = -1;
         wasYellowLight = false;
 
+        // ✅ 重置AB屏的计时器状态
+        screenATimerRemaining = 0;
+        screenBTimerRemaining = 0;
+        screenATimerPausedAt = 0;
+        screenBTimerPausedAt = 0;
+        isFirstSwitch = true;
+
         // 重置状态
         currentState.setStatus("idle");
         currentState.setControlClientId(null);
@@ -324,6 +331,13 @@ public class TimerEngine {
                 currentState.setCurrentStageRemaining(prepTime != null ? prepTime : firstStage.getDuration());
                 currentState.setCurrentStageColor(firstStage.getColor());
             }
+
+            // ✅ 重置AB屏的显示状态
+            currentState.setScreenARemaining(prepTime != null ? prepTime : 0);
+            currentState.setScreenBRemaining(prepTime != null ? prepTime : 0);
+            currentState.setScreenAStatus("paused");
+            currentState.setScreenBStatus("paused");
+            currentState.setActiveScreen("A");
         }
 
         log.info("重置计时");
@@ -579,9 +593,73 @@ public class TimerEngine {
 
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {
-            long screenElapsed = now - screenElapsedAtSwitch;
-            // ❌ 移除：updateCurrentStage已经正确计算阶段剩余时间，这里不应该覆盖
-            // currentState.setCurrentStageRemaining(currentState.getCurrentStageRemaining() - (int)(elapsedSinceLast / 1000));
+            // ✅ 实现完整的AB屏交替计时逻辑
+            int currentStageIdx = currentState.getCurrentStageIndex() != null ? currentState.getCurrentStageIndex() : 0;
+
+            if (currentStageIdx == 0) {
+                // 准备阶段（红灯）：AB屏同步倒计时
+                // 两个屏幕显示相同的准备时间
+                Integer prepTime = currentState.getPreparationTime();
+                int prepRemaining = Math.max(0, (prepTime != null ? prepTime : 0) - totalElapsedSecondsInt);
+                currentState.setScreenARemaining(prepRemaining);
+                currentState.setScreenBRemaining(prepRemaining);
+                currentState.setScreenAStatus("running");
+                currentState.setScreenBStatus("running");
+                log.debug("[AB交替-准备] AB屏同步倒计时: {}秒", prepRemaining);
+            } else if (currentStageIdx == 1) {
+                // 比赛阶段（绿灯）：根据比赛类型处理屏幕切换
+                Integer compTime = currentState.getCompetitionTime();
+                Integer prepTime = currentState.getPreparationTime();
+                int compTimeVal = compTime != null ? compTime : 0;
+                int prepTimeVal = prepTime != null ? prepTime : 0;
+
+                // 计算绿灯阶段已经过的时间（从总经过时间 - 准备时间）
+                int greenElapsedSeconds = totalElapsedSecondsInt - prepTimeVal;
+
+                // 判断是个人赛还是团队赛
+                String matchRuleType = currentMatchType != null && currentMatchType.getName() != null
+                    && currentMatchType.getName().contains("团队") ? "team" : "individual";
+
+                if ("individual".equals(matchRuleType)) {
+                    // ✅ 个人赛规则：切换屏幕时，原屏清零，新屏从比赛时间重新倒计时
+                    if (isAScreenActive) {
+                        // A屏活跃：A屏计时，B屏清零
+                        int aRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        currentState.setScreenARemaining(aRemaining);
+                        currentState.setScreenBRemaining(0);
+                        currentState.setScreenAStatus("running");
+                        currentState.setScreenBStatus("paused");
+                        log.debug("[AB交替-个人赛] A屏计时: {}秒, B屏清零", aRemaining);
+                    } else {
+                        // B屏活跃：B屏计时，A屏清零
+                        int bRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        currentState.setScreenARemaining(0);
+                        currentState.setScreenBRemaining(bRemaining);
+                        currentState.setScreenAStatus("paused");
+                        currentState.setScreenBStatus("running");
+                        log.debug("[AB交替-个人赛] B屏计时: {}秒, A屏清零", bRemaining);
+                    }
+                } else {
+                    // ✅ 团队赛规则：切换屏幕时，原屏暂停并保留剩余时间，新屏从暂停点继续计时
+                    if (isAScreenActive) {
+                        // A屏活跃
+                        int aRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        currentState.setScreenARemaining(aRemaining);
+                        currentState.setScreenAStatus("running");
+                        currentState.setScreenBStatus("paused");
+                        // B屏保持之前的剩余时间
+                        log.debug("[AB交替-团队赛] A屏计时: {}秒, B屏暂停: {}秒", aRemaining, currentState.getScreenBRemaining());
+                    } else {
+                        // B屏活跃
+                        int bRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        currentState.setScreenBRemaining(bRemaining);
+                        currentState.setScreenAStatus("paused");
+                        currentState.setScreenBStatus("running");
+                        // A屏保持之前的剩余时间
+                        log.debug("[AB交替-团队赛] B屏计时: {}秒, A屏暂停: {}秒", bRemaining, currentState.getScreenARemaining());
+                    }
+                }
+            }
         }
 
         // 更新状态
