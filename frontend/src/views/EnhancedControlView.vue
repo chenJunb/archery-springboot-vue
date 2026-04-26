@@ -931,10 +931,22 @@ watch(() => timerState, (newState) => {
     screenMode.value = newState.abMode
   }
 
-  // ✅ 不同步时间配置回本地变量
-  // 原因：用户修改的本地变量应该驱动timerState，而不是反过来
-  // 如果允许timerState反向更新本地变量，服务器返回的旧值会覆盖用户的修改
-  // 预览显示由 timerState 驱动，但用户输入框保持用户最新输入的值
+  // ✅ 新增：同步后端调整过的黄灯时间
+  // 后端可能因为验证约束而调整黄灯时间（例如黄灯 < 比赛时间）
+  // 需要将调整后的值同步到前端显示，以保持一致性
+  if (newState.yellowLightTime !== undefined && newState.yellowLightTime !== null) {
+    if (newState.yellowLightTime !== yellowLightTime.value) {
+      logService.debug('🔄 黄灯时间已被后端调整', {
+        原值: yellowLightTime.value,
+        新值: newState.yellowLightTime
+      })
+      yellowLightTime.value = newState.yellowLightTime
+    }
+  }
+
+  // ✅ 其他时间配置保持本地输入框的值
+  // 原因：用户修改的本地变量应该驱动后端，防止服务器返回的旧值覆盖用户的修改
+  // 但黄灯时间是例外，因为后端可能因为验证约束而调整它
 }, { immediate: false })
 
 // 跟踪是否已发送 selectMatchType 消息

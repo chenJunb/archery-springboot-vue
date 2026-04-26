@@ -385,21 +385,21 @@ public class EnhancedWebSocketController {
         }
 
         if (yellowLight != null && yellowLight >= 0) {
-            // ✅ 新增验证：黄灯时间不能超过比赛时间
+            // ✅ 新增验证：黄灯时间必须小于比赛时间（不能等于或超过）
             Integer compTime = timerEngine.getCurrentState().getCompetitionTime();
-            if (compTime != null && yellowLight > compTime) {
-                log.warn("⚠️ 黄灯时间({}s)不能超过比赛时间({}s)，已调整为比赛时间", yellowLight, compTime);
-                yellowLight = compTime;
+            if (compTime != null && yellowLight >= compTime) {
+                log.warn("⚠️ 黄灯时间({}s)必须小于比赛时间({}s)，已调整为比赛时间-1秒", yellowLight, compTime);
+                yellowLight = Math.max(0, compTime - 1);
             }
             timerEngine.getCurrentState().setYellowLightTime(Math.max(0, yellowLight));
             log.info("✅ 黄灯时间已更新: {}s", yellowLight);
         } else {
-            // ✅ 新增验证：如果只修改了比赛时间，需要检查现有的黄灯时间是否超过新的比赛时间
+            // ✅ 新增验证：如果只修改了比赛时间，需要检查现有的黄灯时间是否大于等于新的比赛时间
             if (competition != null) {
                 Integer existingYellowLight = timerEngine.getCurrentState().getYellowLightTime();
-                if (existingYellowLight != null && existingYellowLight > competition) {
-                    log.warn("⚠️ 现有黄灯时间({}s)超过新的比赛时间({}s)，已调整为新的比赛时间", existingYellowLight, competition);
-                    timerEngine.getCurrentState().setYellowLightTime(competition);
+                if (existingYellowLight != null && existingYellowLight >= competition) {
+                    log.warn("⚠️ 现有黄灯时间({}s)必须小于新的比赛时间({}s)，已调整为新的比赛时间-1秒", existingYellowLight, competition);
+                    timerEngine.getCurrentState().setYellowLightTime(Math.max(0, competition - 1));
                 }
             }
         }
