@@ -182,7 +182,12 @@ const abModeText = computed(() => {
 })
 
 const currentLightColor = computed(() => {
-  // 根据当前阶段计算灯色
+  // ✅ 优先使用后端发送的 currentStageColor（最准确）
+  if (timerState.currentStageColor) {
+    return timerState.currentStageColor
+  }
+
+  // 备选：根据当前阶段名称计算灯色（兼容其他情况）
   const stageName = timerState.currentStageName
   if (!stageName) return '#FF0000'
 
