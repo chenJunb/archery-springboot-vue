@@ -278,15 +278,36 @@ public class TimerEngine {
         currentState.setControlClientId(null);
 
         if (currentMatchType != null) {
-            currentState.setTotalRemaining(currentMatchType.getTotalTime());
+            // ✅ 关键修复：使用当前保存的时间配置而非默认值
+            // 这样用户修改的配置不会被覆盖
+            Integer prepTime = currentState.getPreparationTime();
+            Integer compTime = currentState.getCompetitionTime();
+            Integer yellowTime = currentState.getYellowLightTime();
+
+            // 如果状态中没有保存的配置，使用比赛类型的默认值
+            if (prepTime == null) {
+                prepTime = currentMatchType.getPreparationTime();
+            }
+            if (compTime == null) {
+                compTime = currentMatchType.getCompetitionTime();
+            }
+            if (yellowTime == null) {
+                yellowTime = currentMatchType.getYellowLightTime();
+            }
+
+            // 计算总时间（不包括黄灯时间）
+            int totalTime = (prepTime != null ? prepTime : 0) + (compTime != null ? compTime : 0);
+            currentState.setTotalRemaining(totalTime);
             currentState.setTotalElapsed(0);
 
             if (!currentMatchType.getStages().isEmpty()) {
                 currentState.setCurrentStageIndex(0);
                 MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
                 currentState.setCurrentStageElapsed(0);
-                currentState.setCurrentStageRemaining(firstStage.getDuration());
-                // ✅ 修复1.13: 重置舞台颜色到第一个舞台的颜色
+
+                // ✅ 关键修复：第一个阶段的时间使用保存的准备时间而不是 firstStage.getDuration()
+                // 这确保用户修改的配置在重置后被应用
+                currentState.setCurrentStageRemaining(prepTime != null ? prepTime : firstStage.getDuration());
                 currentState.setCurrentStageColor(firstStage.getColor());
             }
         }
@@ -873,6 +894,13 @@ public class TimerEngine {
             currentState.setAlternateType(currentEnhancedMatchType.getAlternateType());
         }
 
+        return currentState;
+    }
+
+    /**
+     * ✅ 新增：获取当前状态对象的直接引用（用于修改配置）
+     */
+    public TimerStateDTO getCurrentState() {
         return currentState;
     }
 

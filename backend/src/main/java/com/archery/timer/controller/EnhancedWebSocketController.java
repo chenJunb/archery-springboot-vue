@@ -360,7 +360,7 @@ public class EnhancedWebSocketController {
 
     /**
      * 设置时间配置
-     * ✅ 改进：复制状态后再修改，不影响TimerEngine的活跃状态
+     * ✅ 关键修复：直接修改TimerEngine的currentState，确保修改永久保存
      */
     @MessageMapping("/timer/set-time-config")
     @SendTo("/topic/timer-state")
@@ -371,109 +371,52 @@ public class EnhancedWebSocketController {
 
         log.info("收到设置时间配置请求: 准备={}s, 比赛={}s, 黄灯={}s", preparation, competition, yellowLight);
 
-        // ✅ 获取当前状态但不直接修改
-        TimerStateDTO state = timerEngine.getState();
-
-        // ✅ 防护：如果状态为null，返回默认状态
-        if (state == null) {
-            log.warn("⚠️ 计时器状态为null，返回默认状态");
-            return new TimerStateDTO();
+        // ✅ 关键修复：直接修改TimerEngine中的currentState
+        // 这样可以确保修改被永久保存，不会被后续操作覆盖
+        if (preparation != null) {
+            timerEngine.getCurrentState().setPreparationTime(Math.max(0, preparation));
+            log.info("✅ 准备时间已更新: {}s", preparation);
         }
 
-        // ✅ 创建一个新的状态副本进行修改
-        TimerStateDTO updatedState = new TimerStateDTO();
-
-        // 复制现有状态
-        try {
-            // 通过getter/setter复制所有字段
-            updatedState.setStatus(state.getStatus());
-            updatedState.setTotalRemaining(state.getTotalRemaining());
-            updatedState.setCurrentStageIndex(state.getCurrentStageIndex());
-            updatedState.setCurrentStageName(state.getCurrentStageName());
-            updatedState.setCurrentStageColor(state.getCurrentStageColor());
-            updatedState.setActiveScreen(state.getActiveScreen());
-            updatedState.setAbMode(state.getAbMode());
-            updatedState.setTimestamp(System.currentTimeMillis());
-
-            // ✅ 在副本上更新时间配置
-            if (preparation != null) {
-                updatedState.setPreparationTime(Math.max(0, preparation));
-            } else {
-                updatedState.setPreparationTime(state.getPreparationTime());
-            }
-
-            if (competition != null) {
-                updatedState.setCompetitionTime(Math.max(0, competition));
-            } else {
-                updatedState.setCompetitionTime(state.getCompetitionTime());
-            }
-
-            if (yellowLight != null) {
-                updatedState.setYellowLightTime(Math.max(0, yellowLight));
-            } else {
-                updatedState.setYellowLightTime(state.getYellowLightTime());
-            }
-
-            // 注意：我们不应该在这里计算阶段剩余时间，因为阶段剩余时间取决于当前所处的阶段
-            // 阶段剩余时间应该由TimerEngine根据当前阶段计算
-            // 这里只能设置配置值，不能计算阶段值
-
-            // 关键修复：根据当前状态判断应该设置哪个阶段的时间
-            String currentStage = state.getCurrentStageName();
-            int currentStageRemaining = 0;
-
-            if (currentStage != null && currentStage.contains("准备")) {
-                // 如果是准备阶段，设置准备时间
-                currentStageRemaining = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 10);
-            } else if (currentStage != null && (currentStage.contains("比赛") || currentStage.contains("黄灯"))) {
-                // 如果是比赛阶段或黄灯阶段，设置比赛时间
-                currentStageRemaining = (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 180);
-            } else {
-                // 初始状态或未知状态：根据阶段索引判断
-                // 阶段0=准备，阶段1=比赛（黄灯是比赛阶段的特殊状态）
-                Integer stageIndex = state.getCurrentStageIndex();
-                if (stageIndex != null && stageIndex == 0) {
-                    // 阶段0应该是准备阶段
-                    currentStageRemaining = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 10);
-                } else {
-                    // 其他情况默认为比赛时间
-                    currentStageRemaining = (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 180);
-                }
-            }
-
-            // 重新计算总时间（用于总计时）
-            int totalTime = (updatedState.getPreparationTime() != null ? updatedState.getPreparationTime() : 0) +
-                           (updatedState.getCompetitionTime() != null ? updatedState.getCompetitionTime() : 0);
-
-            // ✅ 正确设置阶段相关时间字段
-            updatedState.setTotalRemaining(totalTime);
-            updatedState.setCurrentStageRemaining(currentStageRemaining);  // ✅ 修复：设置当前阶段的剩余时间
-
-            // 对于AB交替模式，为每个屏幕设置适当的初始时间
-            if (updatedState.getAbMode() != null && updatedState.getAbMode().equals("alternate")) {
-                // 初始状态：A屏从当前阶段剩余时间开始，B屏暂停在同一时间
-                updatedState.setScreenARemaining(currentStageRemaining);
-                updatedState.setScreenBRemaining(currentStageRemaining);
-                updatedState.setScreenAStatus("paused");
-                updatedState.setScreenBStatus("paused");
-                if (currentStage != null && !currentStage.contains("准备")) {
-                    updatedState.setScreenAStatus("running"); // 绿灯阶段A屏开始运行
-                }
-            } else {
-                // 同步模式，所有屏幕相同
-                updatedState.setScreenARemaining(currentStageRemaining);
-                updatedState.setScreenBRemaining(currentStageRemaining);
-            }
-
-            // ✅ 广播更新
-            messagingTemplate.convertAndSend("/topic/timer-state", updatedState);
-            log.info("✅ 时间配置已更新并广播 - 总时间: {}s, 当前阶段: {}s, A屏: {}s, B屏: {}s",
-                totalTime, currentStageRemaining, updatedState.getScreenARemaining(), updatedState.getScreenBRemaining());
-            return updatedState;
-        } catch (Exception e) {
-            log.error("设置时间配置失败", e);
-            return state;  // 发生错误时返回原状态
+        if (competition != null) {
+            timerEngine.getCurrentState().setCompetitionTime(Math.max(0, competition));
+            log.info("✅ 比赛时间已更新: {}s", competition);
         }
+
+        if (yellowLight != null) {
+            timerEngine.getCurrentState().setYellowLightTime(Math.max(0, yellowLight));
+            log.info("✅ 黄灯时间已更新: {}s", yellowLight);
+        }
+
+        // ✅ 更新总时间（用于总计时）
+        Integer prepTime = timerEngine.getCurrentState().getPreparationTime();
+        Integer compTime = timerEngine.getCurrentState().getCompetitionTime();
+        if (prepTime != null && compTime != null) {
+            int totalTime = prepTime + compTime;
+            timerEngine.getCurrentState().setTotalRemaining(totalTime);
+            log.info("✅ 总时间已更新: {}s", totalTime);
+        }
+
+        // ✅ 如果当前是准备阶段（idle状态），也更新当前阶段的剩余时间
+        if ("idle".equals(timerEngine.getCurrentState().getStatus()) &&
+            (timerEngine.getCurrentState().getCurrentStageIndex() == null ||
+             timerEngine.getCurrentState().getCurrentStageIndex() == 0)) {
+            if (prepTime != null) {
+                timerEngine.getCurrentState().setCurrentStageRemaining(prepTime);
+                log.info("✅ 准备阶段剩余时间已更新: {}s", prepTime);
+            }
+        }
+
+        // 获取更新后的完整状态进行广播
+        TimerStateDTO updatedState = timerEngine.getState();
+        updatedState.setTimestamp(System.currentTimeMillis());
+
+        log.info("✅ 时间配置已保存并广播 - 准备: {}s, 比赛: {}s, 黄灯: {}s",
+            updatedState.getPreparationTime(),
+            updatedState.getCompetitionTime(),
+            updatedState.getYellowLightTime());
+
+        return updatedState;
     }
 
     /**
