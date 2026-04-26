@@ -51,6 +51,21 @@ const timerState = reactive({
   screenAStatus: 'paused',
   screenBStatus: 'paused',
 
+  // ✅ 新增：AB屏独立的阶段信息（交替模式下使用）
+  screenAStageIndex: 0,
+  screenAStageName: '准备',
+  screenAStageColor: '#FF0000',
+  screenAStageDuration: 0,
+  screenAStageElapsed: 0,
+  screenAStageRemaining: 0,
+
+  screenBStageIndex: 0,
+  screenBStageName: '准备',
+  screenBStageColor: '#FF0000',
+  screenBStageDuration: 0,
+  screenBStageElapsed: 0,
+  screenBStageRemaining: 0,
+
   // 提示文案
   aPrompt: 'A屏',
   bPrompt: 'B屏',
