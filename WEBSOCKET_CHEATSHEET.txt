@@ -1,0 +1,148 @@
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃         WebSocket连接管理 - 极简备忘单                     ┃
+┃         (打印这个备忘单并贴在显示器旁)                      ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+【核心状态对象】
+  globalConnectionState = {
+    isConnected: false,       // WebSocket是否连接
+    isRegistered: false,      // 是否已注册（收到clientId）
+    clientId: null,           // 唯一客户端ID
+    clientType: 'control',    // 'control' | 'display_a' | 'display_b'
+    registerTime: null        // 注册时间
+  }
+
+【连接流程】
+  1. initGlobalWebSocket() → SockJS连接 ✅
+  2. onConnect() → isConnected = true ✅
+  3. subscribeToAllTopics() → 订阅4个主题 ✅
+  4. /app/register → 发送注册请求 ✅
+  5. 收到client_registered → clientId = xxx ✅
+  6. isRegistered = true ✅ 完全就绪
+
+【重连策略 (指数退避)】
+  快速重连 5 次：3s, 6s, 12s, 24s, 30s
+  ↓ 全部失败
+  定期重连：每 30s 尝试一次
+
+【关键变量位置】
+  ┌─ 前端 ──────────────────────────────────────┐
+  │ globalStompClient          L12                │
+  │ globalConnectionState      L15-21             │
+  │ messageCallbacks (Set)     L24   ← 必须是Set │
+  │ maxReconnectAttempts       L26   ← 值: 5    │
+  │ reconnectDelay             L27   ← 值: 3000 │
+  │ maxBackoffDelay            L29   ← 值: 30000│
+  │ maxMessageCallbacks        L32   ← 值: 100  │
+  └─────────────────────────────────────────────┘
+  
+  ┌─ 后端 ──────────────────────────────────────┐
+  │ WebSocketConfig.java                         │
+  │   enableSimpleBroker("/topic", "/queue",    │
+  │                      "/user")      L31       │
+  │   setUserDestinationPrefix("/user")  L32    │
+  │   ChannelInterceptor (入站)         L41-78  │
+  │   ChannelInterceptor (出站)         L84-126 │
+  │                                              │
+  │ WebSocketService.java                        │
+  │   clients (ConcurrentHashMap)      L28      │
+  │   sessionIdToClientId (Mapping)    L30      │
+  │   currentControlClientId           L32      │
+  └─────────────────────────────────────────────┘
+
+【红线代码 - 绝对不能删】
+  ✅ globalConnectionState 对象
+  ✅ messageCallbacks = new Set()
+  ✅ onGlobalWebSocketMessage() 函数
+  ✅ subscribeToAllTopics() 函数
+  ✅ WebSocketConfig 中的 ChannelInterceptor
+  ✅ WebSocketService 中的 sessionIdToClientId 映射
+  ✅ /ws-archery-timer STOMP端点
+
+【黄线代码 - 修改需谨慎】
+  ⚠️ maxReconnectAttempts (3-10)
+  ⚠️ reconnectDelay (1000-10000ms)
+  ⚠️ maxBackoffDelay (10000-60000ms)
+  ⚠️ heartbeatIncoming (10000-30000ms)
+  ⚠️ heartbeatOutgoing (10000-30000ms)
+  ⚠️ setAllowedOriginPatterns("*") → 生产改域名
+
+【快速诊断】
+  问题              症状                      排查点
+  ─────────────────────────────────────────────────
+  连接失败          isConnected: false        后端是否启动?
+                                            Vite代理配置?
+  
+  未注册            isConnected: true,       /user/queue订阅失败?
+                   isRegistered: false       入站拦截器是否存在?
+  
+  消息收不到        已连接已注册             enhancedTimer.js订阅?
+                   但屏幕无更新             后端是否发送状态?
+  
+  频繁断连          日志: 快速重连 1/5       心跳太短? 网络不稳?
+  
+  多个clientId      sessionId重复注册        映射检查是否删除?
+
+【前端验证命令】
+  // 检查连接状态
+  console.log(globalConnectionState)
+  
+  // 检查客户端
+  console.log(globalStompClient)
+  
+  // 手动订阅测试
+  globalStompClient.subscribe('/topic/test', msg => {
+    console.log('收到消息:', msg)
+  })
+
+【后端诊断命令】
+  # 查看后端监听端口
+  netstat -an | grep 8080
+  
+  # 查看连接日志
+  tail -f backend.log | grep "WebSocket\|注册\|入站"
+  
+  # 查看客户端注册
+  grep "新客户端注册成功\|🆕 新会话" backend.log
+
+【错误恢复】
+  错误                         恢复方法
+  ──────────────────────────────────────────────────
+  删除globalConnectionState    参考 WEBSOCKET_CODE_BACKUP.md
+  改成数组messageCallbacks[]   改回 Set，检查onGlobalWebSocketMessage()
+  删除ChannelInterceptor       参考 WEBSOCKET_CODE_BACKUP.md L25-80
+  删除sessionIdToClientId      参考 WEBSOCKET_CODE_BACKUP.md L20-35
+
+【快速恢复清单】
+  1. 打开 WEBSOCKET_CODE_BACKUP.md
+  2. 复制对应文件的完整代码
+  3. 替换当前破坏的文件
+  4. 后端: mvn clean compile
+  5. 前端: npm run dev
+  6. 检查 globalConnectionState (F12 → Console)
+
+【关键日志模式】
+  ✅ 成功:  "✅ 个人队列订阅已创建"
+  ✅ 成功:  "✅ 客户端注册成功"
+  ✅ 成功:  "🟢 -> 🟡 进入黄灯"
+  ❌ 失败:  "❌ 订阅个人队列失败"
+  ⚠️  警告:  "⚠️ WebSocket连接仍未建立"
+
+【记住这三件事】
+  1️⃣ globalConnectionState 是所有UI的源头
+     任何删除都导致系统瘫痪
+
+  2️⃣ ChannelInterceptor 是消息路由的关键
+     删除后 /user/queue 消息无法送达
+
+  3️⃣ sessionIdToClientId 映射防止内存泄漏
+     删除后会导致多重注册
+
+  ═══════════════════════════════════════════════
+
+【完整文档】
+  主文档: WEBSOCKET_CONNECTION_GUIDE.md (36KB)
+  快速查: WEBSOCKET_QUICK_REFERENCE.md (5.5KB)
+  代码备: WEBSOCKET_CODE_BACKUP.md (18KB)
+  索引表: DOCUMENTATION_INDEX.md
+
