@@ -40,6 +40,22 @@ public class TimerStateDTO {
     private String screenAStatus; // A屏状态: running, paused
     private String screenBStatus; // B屏状态: running, paused
 
+    // ✅ 新增：A屏独立的阶段信息（交替模式下使用）
+    private Integer screenAStageIndex;
+    private String screenAStageName;
+    private String screenAStageColor;
+    private Integer screenAStageDuration;
+    private Integer screenAStageElapsed;
+    private Integer screenAStageRemaining;
+
+    // ✅ 新增：B屏独立的阶段信息（交替模式下使用）
+    private Integer screenBStageIndex;
+    private String screenBStageName;
+    private String screenBStageColor;
+    private Integer screenBStageDuration;
+    private Integer screenBStageElapsed;
+    private Integer screenBStageRemaining;
+
     // 提示文案
     private String aPrompt;
     private String bPrompt;

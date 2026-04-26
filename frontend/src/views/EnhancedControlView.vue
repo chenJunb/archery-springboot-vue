@@ -337,7 +337,9 @@
 
             <!-- 当前阶段信息 -->
             <div class="stage-info">
-              <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
+              <div class="stage-name">{{ timerState.abMode === 'alternate' && timerState.screenAStageName
+                ? timerState.screenAStageName
+                : (timerState.currentStageName || '准备阶段') }}</div>
               <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>
@@ -394,7 +396,9 @@
 
             <!-- 当前阶段信息 -->
             <div class="stage-info">
-              <div class="stage-name">{{ timerState.currentStageName || '准备阶段' }}</div>
+              <div class="stage-name">{{ timerState.abMode === 'alternate' && timerState.screenBStageName
+                ? timerState.screenBStageName
+                : (timerState.currentStageName || '准备阶段') }}</div>
               <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>

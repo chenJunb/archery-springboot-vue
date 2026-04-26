@@ -59,7 +59,9 @@
           <div class="stage-label">当前阶段</div>
           <div class="stage-details">
             <div class="stage-name" :style="{ color: currentLightColor }">
-              {{ timerState.currentStageName || '准备阶段' }}
+              {{ timerState.abMode === 'alternate' && timerState.screenBStageName
+                ? timerState.screenBStageName
+                : (timerState.currentStageName || '准备阶段') }}
             </div>
             <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
           </div>
@@ -185,7 +187,12 @@ const abModeText = computed(() => {
 })
 
 const currentLightColor = computed(() => {
-  // ✅ 优先使用后端发送的 currentStageColor（最准确）
+  // ✅ 改进：AB交替模式下使用该屏幕的独立阶段颜色
+  if (timerState.abMode === 'alternate' && timerState.screenBStageColor) {
+    return timerState.screenBStageColor
+  }
+
+  // 优先使用后端发送的 currentStageColor（最准确）
   if (timerState.currentStageColor) {
     return timerState.currentStageColor
   }

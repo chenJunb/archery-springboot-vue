@@ -57,6 +57,22 @@ public class TimerEngine {
     private long screenBTimerRemaining = 0;   // B屏剩余时间
     private boolean isFirstSwitch = true;     // 是否为首次切换
 
+    // ✅ 新增：A屏独立的阶段状态
+    private int screenAPreviousStageIndex = -1;
+    private boolean screenAWasYellowLight = false;
+    private int screenACurrentStageIndex = -1;
+    private String screenACurrentStageName = "准备";
+    private String screenACurrentStageColor = "#FF0000";
+    private int screenACurrentStageRemaining = 0;
+
+    // ✅ 新增：B屏独立的阶段状态
+    private int screenBPreviousStageIndex = -1;
+    private boolean screenBWasYellowLight = false;
+    private int screenBCurrentStageIndex = -1;
+    private String screenBCurrentStageName = "准备";
+    private String screenBCurrentStageColor = "#FF0000";
+    private int screenBCurrentStageRemaining = 0;
+
     // 屏幕状态记录
     private String currentScreenStatus = "A"; // 当前活动屏幕
 
@@ -338,6 +354,33 @@ public class TimerEngine {
             currentState.setScreenAStatus("paused");
             currentState.setScreenBStatus("paused");
             currentState.setActiveScreen("A");
+
+            // ✅ 重置AB屏的独立阶段信息
+            if (!currentMatchType.getStages().isEmpty()) {
+                MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
+
+                // A屏初始化为准备阶段
+                currentState.setScreenAStageIndex(0);
+                currentState.setScreenAStageName(firstStage.getName());
+                currentState.setScreenAStageColor(firstStage.getColor());
+                currentState.setScreenAStageDuration(prepTime != null ? prepTime : firstStage.getDuration());
+                currentState.setScreenAStageElapsed(0);
+                currentState.setScreenAStageRemaining(prepTime != null ? prepTime : firstStage.getDuration());
+
+                // B屏初始化为准备阶段
+                currentState.setScreenBStageIndex(0);
+                currentState.setScreenBStageName(firstStage.getName());
+                currentState.setScreenBStageColor(firstStage.getColor());
+                currentState.setScreenBStageDuration(prepTime != null ? prepTime : firstStage.getDuration());
+                currentState.setScreenBStageElapsed(0);
+                currentState.setScreenBStageRemaining(prepTime != null ? prepTime : firstStage.getDuration());
+            }
+
+            // ✅ 重置AB屏的独立阶段追踪
+            screenAPreviousStageIndex = -1;
+            screenAWasYellowLight = false;
+            screenBPreviousStageIndex = -1;
+            screenBWasYellowLight = false;
         }
 
         log.info("重置计时");
@@ -591,6 +634,12 @@ public class TimerEngine {
                 currentState.getCurrentStageIndex(), currentState.getCurrentStageName(),
                 currentState.getCurrentStageColor());
 
+        // ✅ 新增：AB交替模式下计算独立的屏幕阶段状态
+        if ("alternate".equals(currentState.getAbMode())) {
+            calculateScreenStage("A", totalElapsedSecondsInt);
+            calculateScreenStage("B", totalElapsedSecondsInt);
+        }
+
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {
             // ✅ 实现完整的AB屏交替计时逻辑
@@ -675,6 +724,99 @@ public class TimerEngine {
         log.debug("[计时器状态更新] 调用 notifyStateChange()");
         notifyStateChange();
         log.debug("[计时器状态更新] notifyStateChange() 完成");
+    }
+
+    /**
+     * 计算指定屏幕的独立阶段信息（用于AB交替模式）
+     * ✅ 新增方法：为A/B屏各自计算独立的stage状态
+     */
+    private void calculateScreenStage(String screenName, int totalElapsedSeconds) {
+        if (currentMatchType == null) {
+            return;
+        }
+
+        int accumulatedTime = 0;
+        int currentStageIndex = -1;
+        int stageRemaining = 0;
+        int stageElapsed = 0;
+        MatchTypeDTO.StageDTO currentStage = null;
+
+        // 查找当前阶段
+        for (int i = 0; i < currentMatchType.getStages().size(); i++) {
+            MatchTypeDTO.StageDTO stage = currentMatchType.getStages().get(i);
+
+            // 获取这个阶段的实际时长（优先使用配置值）
+            int stageDuration = stage.getDuration();
+            if (i == 0) {
+                Integer prepTime = currentState.getPreparationTime();
+                if (prepTime != null) {
+                    stageDuration = prepTime;
+                }
+            } else if (i == 1) {
+                Integer compTime = currentState.getCompetitionTime();
+                if (compTime != null) {
+                    stageDuration = compTime;
+                }
+            }
+
+            if (totalElapsedSeconds < accumulatedTime + stageDuration) {
+                currentStageIndex = i;
+                currentStage = stage;
+                stageElapsed = totalElapsedSeconds - accumulatedTime;
+                stageRemaining = stageDuration - stageElapsed;
+                break;
+            }
+            accumulatedTime += stageDuration;
+        }
+
+        if (currentStageIndex == -1) {
+            return;
+        }
+
+        // 判断是否为黄灯状态
+        String stageColor = currentStage.getColor();
+        boolean isYellowLight = false;
+        Integer yellowLightTime = null;
+        if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
+            yellowLightTime = currentState.getYellowLightTime();
+            if (yellowLightTime != null && yellowLightTime > 0 && stageRemaining <= yellowLightTime) {
+                stageColor = "#FFFF00";  // 黄灯颜色
+                isYellowLight = true;
+            }
+        }
+
+        // 获取实际阶段时长
+        int actualStageDuration = currentStage.getDuration();
+        if (currentStageIndex == 0) {
+            Integer prepTime = currentState.getPreparationTime();
+            if (prepTime != null) {
+                actualStageDuration = prepTime;
+            }
+        } else if (currentStageIndex == 1) {
+            Integer compTime = currentState.getCompetitionTime();
+            if (compTime != null) {
+                actualStageDuration = compTime;
+            }
+        }
+
+        // 更新对应屏幕的状态字段
+        if ("A".equals(screenName)) {
+            String stageName = isYellowLight ? "黄灯" : currentStage.getName();
+            currentState.setScreenAStageIndex(currentStageIndex);
+            currentState.setScreenAStageName(stageName);
+            currentState.setScreenAStageColor(stageColor);
+            currentState.setScreenAStageDuration(actualStageDuration);
+            currentState.setScreenAStageElapsed(stageElapsed);
+            currentState.setScreenAStageRemaining(stageRemaining);
+        } else if ("B".equals(screenName)) {
+            String stageName = isYellowLight ? "黄灯" : currentStage.getName();
+            currentState.setScreenBStageIndex(currentStageIndex);
+            currentState.setScreenBStageName(stageName);
+            currentState.setScreenBStageColor(stageColor);
+            currentState.setScreenBStageDuration(actualStageDuration);
+            currentState.setScreenBStageElapsed(stageElapsed);
+            currentState.setScreenBStageRemaining(stageRemaining);
+        }
     }
 
     /**
