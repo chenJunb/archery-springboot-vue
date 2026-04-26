@@ -673,6 +673,12 @@ const handleMatchTypeChange = (matchTypeId) => {
 
     // 重置AB屏和控制按钮到初始状态
     resetABScreenState()
+
+    // ✅ 关键修复：比赛类型变更后发送后端重置消息
+    if (timerStore.connectionState.isConnected) {
+      logService.info('比赛类型已变更，发送后端重置消息', { matchTypeId })
+      timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+    }
   }
 }
 
@@ -695,6 +701,10 @@ const handleScreenModeChange = (mode) => {
 
       // 重置AB屏和控制按钮到初始状态
       resetABScreenState()
+
+      // ✅ 关键修复：屏幕模式变更后发送后端重置消息
+      logService.info('屏幕模式已变更，发送后端重置消息', { mode })
+      timerStore.sendGlobalWebSocketMessage('timer/reset', {})
     } catch (error) {
       logService.error('设置屏幕模式失败', { error: error.message })
       ElMessage.error('设置屏幕模式失败，请重试')
@@ -747,6 +757,10 @@ const updateTimeConfig = () => {
   // 后端会计算 currentStageRemaining 并发送回来
   // 前端会在 WebSocket 消息处理器中无条件接收和更新
 
+  // ✅ 关键修复：时间配置变更后发送后端重置消息
+  logService.info('时间配置已变更，发送后端重置消息', { config })
+  timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+
   resetABScreenState()
 }
 
@@ -780,6 +794,10 @@ const onTimeConfigBlur = () => {
 
   timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
 
+  // ✅ 关键修复：时间配置变更后发送后端重置消息
+  logService.info('时间配置已变更（失焦触发），发送后端重置消息', { config })
+  timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+
   // ✅ 不调用 syncTimeConfigToPreview
   // 原因：不在前端做任何计算，完全等待后端广播
   // 后端会计算并广播：{preparationTime, competitionTime, yellowLightTime, currentStageRemaining, ...}
@@ -789,16 +807,21 @@ const onTimeConfigBlur = () => {
 const updatePrompt = (screen, prompt) => {
   logService.debug(`更新${screen}屏提示文案: "${prompt}"，连接状态:`, timerStore.connectionState)
   if (timerStore.connectionState.isConnected && timerStore.connectionState.clientId) {
+    // ✅ 连接已建立，直接发送到服务器
     timerStore.setPrompt(screen, prompt)
-    logService.debug(`✅ 已发送${screen}屏提示文案到服务器`)
+    logService.info(`✅ 已发送${screen}屏提示文案到服务器: "${prompt}"`)
   } else {
-    logService.debug(`⏳ ${screen}屏提示文案已保存，等待WebSocket连接后发送`)
-    // 保存到本地状态，等连接后重新发送
+    // ⏳ 连接未建立，暂时保存到本地状态
+    // 当连接建立后，需要重新发送
+    logService.debug(`⏳ WebSocket未连接，暂存${screen}屏提示文案: "${prompt}"`)
     if (screen === 'A') {
       timerState.aPrompt = prompt
     } else {
       timerState.bPrompt = prompt
     }
+
+    // 📝 标记待发送状态，当连接建立后会自动重新发送
+    // 这确保即使用户在连接前修改了提示文案，也不会丢失
   }
 }
 
