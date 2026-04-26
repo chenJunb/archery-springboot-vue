@@ -317,7 +317,8 @@
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
                 <template v-if="screenMode === 'alternate'">
                   <div class="timer-label">A屏剩余</div>
-                  <div class="timer-value">{{ Math.round(timerState.screenARemaining) }}</div>
+                  <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
+                  <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>
                 </template>
                 <template v-else>
                   <div class="timer-label">剩余秒数</div>
@@ -373,7 +374,8 @@
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
                 <template v-if="screenMode === 'alternate'">
                   <div class="timer-label">B屏剩余</div>
-                  <div class="timer-value">{{ Math.round(timerState.screenBRemaining) }}</div>
+                  <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
+                  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>
                 </template>
                 <template v-else>
                   <div class="timer-label">剩余秒数</div>
@@ -538,6 +540,26 @@ const totalTime = computed(() => {
   const prep = preparationTime.value ?? 0
   const comp = competitionTime.value ?? 0
   return prep + comp
+})
+
+// ✅ 新增：A屏预览的实时剩余时间计算（参考displayRemaining逻辑）
+const displayScreenARemaining = computed(() => {
+  // 如果是交替模式且A屏正在运行，使用实时倒计时
+  if (screenMode.value === 'alternate' && timerState.screenAStatus === 'running') {
+    return timerStore.getDisplayRemaining()  // 使用全局实时倒计时
+  }
+  // 其他情况返回屏幕的当前值
+  return timerState.screenARemaining || 0
+})
+
+// ✅ 新增：B屏预览的实时剩余时间计算（参考displayRemaining逻辑）
+const displayScreenBRemaining = computed(() => {
+  // 如果是交替模式且B屏正在运行，使用实时倒计时
+  if (screenMode.value === 'alternate' && timerState.screenBStatus === 'running') {
+    return timerStore.getDisplayRemaining()  // 使用全局实时倒计时
+  }
+  // 其他情况返回屏幕的当前值
+  return timerState.screenBRemaining || 0
 })
 
 const currentLightColor = computed(() => {
