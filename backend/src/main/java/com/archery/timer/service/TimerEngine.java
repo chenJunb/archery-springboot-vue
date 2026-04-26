@@ -147,9 +147,16 @@ public class TimerEngine {
             MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
             this.currentState.setCurrentStageName(firstStage.getName());
             this.currentState.setCurrentStageColor(firstStage.getColor());
-            this.currentState.setCurrentStageDuration(firstStage.getDuration());
+
+            // ✅ 关键修复：使用已保存的配置值而不是默认值
+            Integer stageDuration = this.currentState.getPreparationTime();
+            if (stageDuration == null) {
+                stageDuration = firstStage.getDuration();
+            }
+
+            this.currentState.setCurrentStageDuration(stageDuration);
             this.currentState.setCurrentStageElapsed(0);
-            this.currentState.setCurrentStageRemaining(firstStage.getDuration());
+            this.currentState.setCurrentStageRemaining(stageDuration);
         }
 
         // 重置阶段切换跟踪
@@ -537,11 +544,14 @@ public class TimerEngine {
             return;
         }
 
-        int totalRemainingSeconds = Math.max(0, currentMatchType.getTotalTime() - totalElapsedSecondsInt);
+        // ✅ 关键修复：使用currentState中的总时间，而不是currentMatchType的默认值
+        // 这样才能正确使用用户修改后的时间配置
+        Integer configuredTotalTime = currentState.getTotalRemaining() + totalElapsedSecondsInt;
+        int totalRemainingSeconds = Math.max(0, configuredTotalTime - totalElapsedSecondsInt);
 
         // ✅ 修复：添加详细日志记录进度
         log.info("[计时器状态] 经过: {}秒, 剩余: {}秒, 总时间: {}秒, 当前阶段: {} (索引{})",
-                totalElapsedSecondsInt, totalRemainingSeconds, currentMatchType.getTotalTime(),
+                totalElapsedSecondsInt, totalRemainingSeconds, configuredTotalTime,
                 currentState.getCurrentStageName(), currentState.getCurrentStageIndex());
 
         // 检查是否结束
@@ -630,7 +640,8 @@ public class TimerEngine {
         Integer yellowLightTime = null;
         if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
             // 比赛阶段：检查是否进入黄灯时间
-            yellowLightTime = currentEnhancedMatchType.getYellowLightTime();
+            // ✅ 关键修复：使用currentState中的黄灯时间，而不是比赛类型的默认值
+            yellowLightTime = currentState.getYellowLightTime();
             if (yellowLightTime != null && yellowLightTime > 0 && stageRemaining <= yellowLightTime) {
                 // 进入黄灯阶段
                 stageColor = "#FFFF00";  // 黄灯颜色

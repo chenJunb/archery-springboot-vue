@@ -361,6 +361,7 @@ public class EnhancedWebSocketController {
     /**
      * 设置时间配置
      * ✅ 关键修复：直接修改TimerEngine的currentState，确保修改永久保存
+     * ✅ 新增：验证黄灯时间不能超过比赛时间
      */
     @MessageMapping("/timer/set-time-config")
     @SendTo("/topic/timer-state")
@@ -373,19 +374,34 @@ public class EnhancedWebSocketController {
 
         // ✅ 关键修复：直接修改TimerEngine中的currentState
         // 这样可以确保修改被永久保存，不会被后续操作覆盖
-        if (preparation != null) {
+        if (preparation != null && preparation >= 0) {
             timerEngine.getCurrentState().setPreparationTime(Math.max(0, preparation));
             log.info("✅ 准备时间已更新: {}s", preparation);
         }
 
-        if (competition != null) {
+        if (competition != null && competition >= 0) {
             timerEngine.getCurrentState().setCompetitionTime(Math.max(0, competition));
             log.info("✅ 比赛时间已更新: {}s", competition);
         }
 
-        if (yellowLight != null) {
+        if (yellowLight != null && yellowLight >= 0) {
+            // ✅ 新增验证：黄灯时间不能超过比赛时间
+            Integer compTime = timerEngine.getCurrentState().getCompetitionTime();
+            if (compTime != null && yellowLight > compTime) {
+                log.warn("⚠️ 黄灯时间({}s)不能超过比赛时间({}s)，已调整为比赛时间", yellowLight, compTime);
+                yellowLight = compTime;
+            }
             timerEngine.getCurrentState().setYellowLightTime(Math.max(0, yellowLight));
             log.info("✅ 黄灯时间已更新: {}s", yellowLight);
+        } else {
+            // ✅ 新增验证：如果只修改了比赛时间，需要检查现有的黄灯时间是否超过新的比赛时间
+            if (competition != null) {
+                Integer existingYellowLight = timerEngine.getCurrentState().getYellowLightTime();
+                if (existingYellowLight != null && existingYellowLight > competition) {
+                    log.warn("⚠️ 现有黄灯时间({}s)超过新的比赛时间({}s)，已调整为新的比赛时间", existingYellowLight, competition);
+                    timerEngine.getCurrentState().setYellowLightTime(competition);
+                }
+            }
         }
 
         // ✅ 更新总时间（用于总计时）
