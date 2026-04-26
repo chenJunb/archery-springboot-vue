@@ -203,8 +203,18 @@ const currentScreenRemaining = computed(() => {
   return timerState.screenBRemaining || timerState.currentStageRemaining
 })
 
-// 获取显示的剩余时间 - 用于实时显示
+// ✅ 改进：交替模式下根据屏幕状态显示正确的倒计时
 const displayRemaining = computed(() => {
+  if (timerState.abMode === 'alternate') {
+    // 交替模式：显示该屏幕的实时倒计时
+    // 如果该屏幕是活跃的且正在运行，使用全局实时倒计时
+    if (timerStore.isActiveScreen('B') && timerState.screenBStatus === 'running') {
+      return timerStore.getDisplayRemaining()
+    }
+    // 否则显示该屏幕的当前剩余时间（可能是暂停或等待）
+    return timerState.screenBRemaining || 0
+  }
+  // 其他模式：使用全局实时倒计时
   return timerStore.getDisplayRemaining()
 })
 
