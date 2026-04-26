@@ -111,7 +111,20 @@ public class TimerEngine {
         // 更新基本状态
         this.currentState.setMatchTypeId(matchTypeId);
         this.currentState.setMatchTypeName(enhancedMatchType.getChineseName());
-        this.currentState.setTotalRemaining(enhancedMatchType.getTotalTime());
+
+        // 设置时间配置
+        Integer prepTime = enhancedMatchType.getPreparationTime();
+        Integer compTime = enhancedMatchType.getCompetitionTime();
+        if (prepTime != null) {
+            this.currentState.setPreparationTime(prepTime);
+        }
+        if (compTime != null) {
+            this.currentState.setCompetitionTime(compTime);
+        }
+
+        // ✅ 关键修复：总时间应该由配置的准备时间 + 比赛时间组成，而不是比赛类型的默认值
+        int totalTime = (prepTime != null ? prepTime : 0) + (compTime != null ? compTime : 0);
+        this.currentState.setTotalRemaining(totalTime);
         this.currentState.setTotalElapsed(0);
 
         // 应用比赛类型的默认AB屏模式
@@ -127,13 +140,7 @@ public class TimerEngine {
             this.currentState.setBPrompt(enhancedMatchType.getDefaultBPrompt());
         }
 
-        // 设置时间配置
-        if (enhancedMatchType.getPreparationTime() != null) {
-            this.currentState.setPreparationTime(enhancedMatchType.getPreparationTime());
-        }
-        if (enhancedMatchType.getCompetitionTime() != null) {
-            this.currentState.setCompetitionTime(enhancedMatchType.getCompetitionTime());
-        }
+        // 设置黄灯时间
         if (enhancedMatchType.getYellowLightTime() != null) {
             this.currentState.setYellowLightTime(enhancedMatchType.getYellowLightTime());
         } else {
@@ -579,7 +586,8 @@ public class TimerEngine {
 
         // 更新状态
         currentState.setTotalElapsed(totalElapsedSecondsInt);
-        currentState.setTotalRemaining(totalRemainingSeconds);
+        //倒计时 总时间不改变，总时间为本次计时固定信息
+//        currentState.setTotalRemaining(totalRemainingSeconds);
         currentState.setLastUpdateTime(LocalDateTime.now());
         currentState.setTimestamp(now);
 
@@ -612,20 +620,39 @@ public class TimerEngine {
         MatchTypeDTO.StageDTO currentStage = null;
 
         // 查找当前阶段
+        // ✅ 关键修复：使用配置的时间而不是默认的stage.getDuration()
+        // 这样才能正确处理用户修改后的时间配置
         for (int i = 0; i < currentMatchType.getStages().size(); i++) {
             MatchTypeDTO.StageDTO stage = currentMatchType.getStages().get(i);
-            log.debug("[阶段更新] 检查阶段{}: {}, 持续时间: {}秒, 累计时间: {}秒",
-                    i, stage.getName(), stage.getDuration(), accumulatedTime);
-            if (totalElapsedSeconds < accumulatedTime + stage.getDuration()) {
+
+            // 获取这个阶段的实际时长（优先使用配置值）
+            int stageDuration = stage.getDuration();
+            if (i == 0) {
+                // 准备阶段：使用配置的准备时间
+                Integer prepTime = currentState.getPreparationTime();
+                if (prepTime != null) {
+                    stageDuration = prepTime;
+                }
+            } else if (i == 1) {
+                // 比赛阶段：使用配置的比赛时间
+                Integer compTime = currentState.getCompetitionTime();
+                if (compTime != null) {
+                    stageDuration = compTime;
+                }
+            }
+
+            log.debug("[阶段更新] 检查阶段{}: {}, 持续时间: {}秒(默认: {}), 累计时间: {}秒",
+                    i, stage.getName(), stageDuration, stage.getDuration(), accumulatedTime);
+            if (totalElapsedSeconds < accumulatedTime + stageDuration) {
                 currentStageIndex = i;
                 currentStage = stage;
                 stageElapsed = totalElapsedSeconds - accumulatedTime;
-                stageRemaining = stage.getDuration() - stageElapsed;
+                stageRemaining = stageDuration - stageElapsed;
                 log.debug("[阶段更新] 找到当前阶段: {} (索引{}), 阶段已过: {}秒, 剩余: {}秒",
                         stage.getName(), currentStageIndex, stageElapsed, stageRemaining);
                 break;
             }
-            accumulatedTime += stage.getDuration();
+            accumulatedTime += stageDuration;
         }
 
         // 如果超出所有阶段，结束计时
