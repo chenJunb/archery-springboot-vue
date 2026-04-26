@@ -1004,7 +1004,23 @@ public class TimerEngine {
         currentState.setTotalRemaining(0);
         currentState.setTotalElapsed(currentMatchType.getTotalTime());
 
-        log.info("计时结束 - 比赛类型: {}", currentMatchType.getName());
+        // ✅ 改进：结束时也需要更新AB屏的独立系统状态
+        // 计算最终阶段状态（通常是最后一个阶段）
+        if (currentMatchType != null && currentMatchType.getStages() != null) {
+            int totalTime = currentMatchType.getTotalTime();
+
+            // 更新全局阶段信息
+            updateCurrentStage(totalTime);
+
+            // 更新AB屏的独立阶段信息
+            calculateScreenStage("A", totalTime);
+            calculateScreenStage("B", totalTime);
+
+            log.info("计时结束 - 比赛类型: {}, 已更新AB屏状态", currentMatchType.getName());
+        } else {
+            log.info("计时结束 - 比赛类型: {}", currentMatchType != null ? currentMatchType.getName() : "未知");
+        }
+
         notifyStateChange();
     }
 
