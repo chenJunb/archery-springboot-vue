@@ -40,7 +40,8 @@
           <!-- 倒计时时间 -->
           <div class="time-display">
             <!-- 仅显示纯数字秒数，不做任何时间格式化 -->
-            <div class="time-value">{{ Math.round(timerState.abMode === 'alternate' ? timerStore.getCurrentScreenRemainingWithLocalCountdown('A') : displayRemaining) }}</div>
+            <!-- ✅ 修复：交替模式也使用统一的实时倒计时显示（参考同步模式），确保每秒更新 -->
+            <div class="time-value">{{ Math.round(displayRemaining) }}</div>
             <div class="time-label">剩余秒数</div>
           </div>
 
