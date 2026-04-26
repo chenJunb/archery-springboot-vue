@@ -655,11 +655,10 @@ public class TimerEngine {
                 currentState.getCurrentStageIndex(), currentState.getCurrentStageName(),
                 currentState.getCurrentStageColor());
 
-        // ✅ 新增：AB交替模式下计算独立的屏幕阶段状态
-        if ("alternate".equals(currentState.getAbMode())) {
-            calculateScreenStage("A", totalElapsedSecondsInt);
-            calculateScreenStage("B", totalElapsedSecondsInt);
-        }
+        // ✅ 改进：所有屏幕模式下都计算A屏和B屏的独立系统
+        // 这样无论选择什么模式，后端都提供完整的独立屏幕数据
+        calculateScreenStage("A", totalElapsedSecondsInt);
+        calculateScreenStage("B", totalElapsedSecondsInt);
 
         // AB交替模式处理
         if ("alternate".equals(currentState.getAbMode())) {

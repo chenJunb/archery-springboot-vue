@@ -337,9 +337,7 @@
 
             <!-- 当前阶段信息 -->
             <div class="stage-info">
-              <div class="stage-name">{{ timerState.abMode === 'alternate' && timerState.screenAStageName
-                ? timerState.screenAStageName
-                : (timerState.currentStageName || '准备阶段') }}</div>
+              <div class="stage-name">{{ timerState.screenAStageName || '准备阶段' }}</div>
               <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>
@@ -396,9 +394,7 @@
 
             <!-- 当前阶段信息 -->
             <div class="stage-info">
-              <div class="stage-name">{{ timerState.abMode === 'alternate' && timerState.screenBStageName
-                ? timerState.screenBStageName
-                : (timerState.currentStageName || '准备阶段') }}</div>
+              <div class="stage-name">{{ timerState.screenBStageName || '准备阶段' }}</div>
               <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
             </div>
           </div>
@@ -581,17 +577,17 @@ const currentLightColor = computed(() => {
   return '#00FF00' // 绿色
 })
 
-// ✅ 新增：A屏独立的灯颜色（交替模式下）
+// ✅ 改进：所有模式下A屏预览使用独立的灯颜色
 const screenALightColor = computed(() => {
-  if (timerState.abMode === 'alternate' && timerState.screenAStageColor) {
+  if (timerState.screenAStageColor) {
     return timerState.screenAStageColor
   }
   return currentLightColor.value
 })
 
-// ✅ 新增：B屏独立的灯颜色（交替模式下）
+// ✅ 改进：所有模式下B屏预览使用独立的灯颜色
 const screenBLightColor = computed(() => {
-  if (timerState.abMode === 'alternate' && timerState.screenBStageColor) {
+  if (timerState.screenBStageColor) {
     return timerState.screenBStageColor
   }
   return currentLightColor.value
