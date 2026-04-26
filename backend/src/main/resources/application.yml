@@ -10,7 +10,7 @@ spring:
 
 logging:
   level:
-    com.archery.timer: INFO
+    com.archery.timer: DEBUG
   file:
     name: logs/archery-timer.log
     max-size: 10MB
