@@ -463,6 +463,18 @@ public class TimerEngine {
             currentState.setScreenBEnabled(true);
         }
 
+        // ✅ 改进：屏幕模式切换时需要更新AB屏的独立系统状态
+        if (isTimerRunning && !isTimerPaused) {
+            // 如果正在运行，计算当前经过时间
+            long now = System.currentTimeMillis();
+            long totalElapsed = now - timerStartedAt;
+            int totalElapsedSeconds = (int) (totalElapsed / 1000);
+
+            // 更新AB屏的独立阶段信息
+            calculateScreenStage("A", totalElapsedSeconds);
+            calculateScreenStage("B", totalElapsedSeconds);
+        }
+
         log.info("设置AB屏模式: {}", mode);
         notifyStateChange();
     }
