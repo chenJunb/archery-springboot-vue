@@ -308,7 +308,7 @@
             <!-- 屏幕状态 -->
             <div class="screen-status">
               <!-- 圆形状态灯 -->
-              <div class="status-light" :style="{ backgroundColor: currentLightColor }">
+              <div class="status-light" :style="{ backgroundColor: screenALightColor }">
                 <div class="light-glow"></div>
               </div>
 
@@ -367,7 +367,7 @@
             <!-- 屏幕状态 -->
             <div class="screen-status">
               <!-- 圆形状态灯 -->
-              <div class="status-light" :style="{ backgroundColor: currentLightColor }">
+              <div class="status-light" :style="{ backgroundColor: screenBLightColor }">
                 <div class="light-glow"></div>
               </div>
 
@@ -579,6 +579,22 @@ const currentLightColor = computed(() => {
   if (stageName.includes('准备')) return '#FF0000' // 红色
   if (stageName.includes('黄灯')) return '#FFFF00' // 黄色
   return '#00FF00' // 绿色
+})
+
+// ✅ 新增：A屏独立的灯颜色（交替模式下）
+const screenALightColor = computed(() => {
+  if (timerState.abMode === 'alternate' && timerState.screenAStageColor) {
+    return timerState.screenAStageColor
+  }
+  return currentLightColor.value
+})
+
+// ✅ 新增：B屏独立的灯颜色（交替模式下）
+const screenBLightColor = computed(() => {
+  if (timerState.abMode === 'alternate' && timerState.screenBStageColor) {
+    return timerState.screenBStageColor
+  }
+  return currentLightColor.value
 })
 
 const canStart = computed(() => {
