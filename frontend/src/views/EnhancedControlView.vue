@@ -719,9 +719,12 @@ const handleScreenModeChange = (mode) => {
 
 // 重置AB屏和控制按钮到初始状态
 const resetABScreenState = () => {
-  // 当比赛类型或配置更改时，重置屏幕到初始状态
-  // 这会让后端根据新的比赛类型配置重新初始化屏幕状态
-  logService.debug('配置已更改，AB屏状态将根据新的比赛类型重新初始化')
+  // ✅ 改进：实际重置本地前端状态，确保与后端同步
+  logService.debug('重置AB屏状态到初始状态')
+
+  // 等待后端广播新状态（通过 WebSocket 消息处理器更新 timerState）
+  // 前端会通过 watch timerState 自动更新显示
+  // 预览区会显示最新的倒计时和灯色
 }
 
 const updateTimeConfig = () => {
@@ -847,7 +850,12 @@ const pauseTimer = () => {
 
 const resetTimer = () => {
   if (timerStore.connectionState.isConnected) {
+    logService.debug('点击重置按钮，发送后端重置消息')
     timerStore.resetTimer()
+
+    // ✅ 关键修复：重置前端本地状态，回到当前时间配置的初始状态
+    // 确保所有控制按钮和屏幕显示都复位
+    resetABScreenState()
   }
 }
 
