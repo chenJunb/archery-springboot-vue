@@ -606,6 +606,15 @@ public class TimerEngine {
         isAScreenActive = "A".equals(newScreen);
         screenElapsedAtSwitch = now;
 
+        // ✅ 改进：屏幕切换时也需要更新AB屏的独立系统状态
+        // 计算当前的经过时间
+        long totalElapsed = now - timerStartedAt;
+        int totalElapsedSeconds = (int) (totalElapsed / 1000);
+
+        // 更新AB屏的独立阶段信息
+        calculateScreenStage("A", totalElapsedSeconds);
+        calculateScreenStage("B", totalElapsedSeconds);
+
         log.info("屏幕切换完成 => 当前活动屏幕: {}, A剩余: {}秒, B剩余: {}秒",
             newScreen, screenATimerRemaining, screenBTimerRemaining);
 
