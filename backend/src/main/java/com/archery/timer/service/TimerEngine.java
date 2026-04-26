@@ -51,6 +51,8 @@ public class TimerEngine {
     private volatile long screenElapsedAtSwitch = 0;  // ✅ volatile: 屏幕切换时间戳在多线程中使用
 
     // AB交替模式下的屏幕计时器状态
+    private long screenAStartedAt = 0;         // ✅ A屏的独立开始时间（用于个人赛独立倒计时）
+    private long screenBStartedAt = 0;         // ✅ B屏的独立开始时间（用于个人赛独立倒计时）
     private long screenATimerPausedAt = 0;    // A屏暂停时的时间戳
     private long screenBTimerPausedAt = 0;    // B屏暂停时的时间戳
     private long screenATimerRemaining = 0;   // A屏剩余时间
@@ -262,6 +264,9 @@ public class TimerEngine {
             timerStartedAt = now;
             lastUpdateAt = now;
             screenElapsedAtSwitch = 0;
+            // ✅ 初始化屏幕的独立起始时间（个人赛需要用到）
+            screenAStartedAt = now;
+            screenBStartedAt = now;
             log.debug("✅ 时间基准已重置 - timerStartedAt: {}, lastUpdateAt: {}", timerStartedAt, lastUpdateAt);
         }
 
@@ -332,6 +337,10 @@ public class TimerEngine {
         lastUpdateAt = 0;
         screenElapsedAtSwitch = 0;
         isAScreenActive = true;
+
+        // ✅ 重置屏幕独立起始时间
+        screenAStartedAt = 0;
+        screenBStartedAt = 0;
 
         // 重置阶段切换跟踪
         previousStageIndex = -1;
@@ -658,6 +667,23 @@ public class TimerEngine {
         isAScreenActive = "A".equals(newScreen);
         screenElapsedAtSwitch = now;
 
+        // ✅ 关键修复：在个人赛中，为新激活的屏幕设置独立的起始时间
+        // 这样新屏幕的阶段计算就会基于自己的起始时间，而不是全局时间
+        String matchRuleType = currentMatchType != null && currentMatchType.getName() != null
+            && currentMatchType.getName().contains("团队") ? "team" : "individual";
+
+        if ("individual".equals(matchRuleType)) {
+            if ("A".equals(newScreen)) {
+                // 切换到A屏时，设置A屏的独立起始时间
+                screenAStartedAt = now;
+                log.info("屏幕切换: A屏激活，设置独立起始时间");
+            } else {
+                // 切换到B屏时，设置B屏的独立起始时间
+                screenBStartedAt = now;
+                log.info("屏幕切换: B屏激活，设置独立起始时间");
+            }
+        }
+
         // ✅ 改进：屏幕切换时也需要更新AB屏的独立系统状态
         // 计算当前的经过时间
         long totalElapsed = now - timerStartedAt;
@@ -782,49 +808,49 @@ public class TimerEngine {
                 int compTimeVal = compTime != null ? compTime : 0;
                 int prepTimeVal = prepTime != null ? prepTime : 0;
 
-                // 计算绿灯阶段已经过的时间（从总经过时间 - 准备时间）
-                int greenElapsedSeconds = totalElapsedSecondsInt - prepTimeVal;
-
                 // 判断是个人赛还是团队赛
                 String matchRuleType = currentMatchType != null && currentMatchType.getName() != null
                     && currentMatchType.getName().contains("团队") ? "team" : "individual";
 
                 if ("individual".equals(matchRuleType)) {
                     // ✅ 个人赛规则：切换屏幕时，原屏清零，新屏从比赛时间重新倒计时
+                    // 关键修复：每个屏幕有独立的时间计算，不受全局绿灯阶段时间影响
                     if (isAScreenActive) {
-                        // A屏活跃：A屏计时，B屏展示比赛初始时间
-                        int aRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        // A屏活跃：A屏独立计时，B屏展示比赛初始时间
+                        // ✅ 使用A屏的独立剩余时间（在toggleABScreen或resetTimer时初始化）
+                        int aRemaining = (int) (screenATimerRemaining >= 0 ? screenATimerRemaining : compTimeVal);
                         currentState.setScreenARemaining(aRemaining);
                         currentState.setScreenBRemaining(compTime);
                         currentState.setScreenAStatus("running");
                         currentState.setScreenBStatus("paused");
-                        log.info("[AB交替-个人赛] A屏计时: {}秒, B屏清零", aRemaining);
+                        log.info("[AB交替-个人赛] A屏活跃计时: {}秒, B屏初始: {}秒", aRemaining, compTime);
                     } else {
-                        // B屏活跃：B屏计时，A屏展示比赛初始时间
-                        int bRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
-                        currentState.setScreenARemaining(compTime);
+                        // B屏活跃：B屏独立计时，A屏展示比赛初始时间（清零）
+                        // ✅ 使用B屏的独立剩余时间（在toggleABScreen或resetTimer时初始化）
+                        int bRemaining = (int) (screenBTimerRemaining >= 0 ? screenBTimerRemaining : compTimeVal);
+                        currentState.setScreenARemaining(0);
                         currentState.setScreenBRemaining(bRemaining);
                         currentState.setScreenAStatus("paused");
                         currentState.setScreenBStatus("running");
-                        log.info("[AB交替-个人赛] B屏计时: {}秒, A屏清零", bRemaining);
+                        log.info("[AB交替-个人赛] B屏活跃计时: {}秒, A屏清零: 0秒", bRemaining);
                     }
                 } else {
                     // ✅ 团队赛规则：切换屏幕时，原屏暂停并保留剩余时间，新屏从暂停点继续计时
                     if (isAScreenActive) {
                         // A屏活跃
-                        int aRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        int aRemaining = (int) (screenATimerRemaining >= 0 ? screenATimerRemaining : compTimeVal);
                         currentState.setScreenARemaining(aRemaining);
                         currentState.setScreenAStatus("running");
                         currentState.setScreenBStatus("paused");
-                        // B屏保持之前的剩余时间
+                        // B屏保持之前的剩余时间（独立维护）
                         log.info("[AB交替-团队赛] A屏计时: {}秒, B屏暂停: {}秒", aRemaining, currentState.getScreenBRemaining());
                     } else {
                         // B屏活跃
-                        int bRemaining = Math.max(0, compTimeVal - greenElapsedSeconds);
+                        int bRemaining = (int) (screenBTimerRemaining >= 0 ? screenBTimerRemaining : compTimeVal);
                         currentState.setScreenBRemaining(bRemaining);
                         currentState.setScreenAStatus("paused");
                         currentState.setScreenBStatus("running");
-                        // A屏保持之前的剩余时间
+                        // A屏保持之前的剩余时间（独立维护）
                         log.info("[AB交替-团队赛] B屏计时: {}秒, A屏暂停: {}秒", bRemaining, currentState.getScreenARemaining());
                     }
                 }
@@ -849,10 +875,35 @@ public class TimerEngine {
     /**
      * 计算指定屏幕的独立阶段信息（用于AB交替模式）
      * ✅ 新增方法：为A/B屏各自计算独立的stage状态
+     *
+     * 在个人赛中，每个屏幕有独立的时间基准：
+     * - 屏幕激活时重置自己的开始时间
+     * - 计算时使用相对于自己开始时间的经过时间
+     * - 这样新激活的屏幕总是从绿灯初始状态开始
      */
     private void calculateScreenStage(String screenName, int totalElapsedSeconds) {
         if (currentMatchType == null) {
             return;
+        }
+
+        // ✅ 在个人赛中，屏幕应该使用自己的独立开始时间
+        // 这样确保新激活的屏幕总是从绿灯初始状态开始，而不是继承全局时间
+        int screenElapsedSeconds = totalElapsedSeconds;
+        boolean isIndividual = currentMatchType != null && currentMatchType.getName() != null
+            && !currentMatchType.getName().contains("团队");
+
+        if (isIndividual) {
+            if ("A".equals(screenName) && screenAStartedAt > 0) {
+                // A屏：使用A屏的独立起始时间
+                long now = System.currentTimeMillis();
+                screenElapsedSeconds = (int) ((now - screenAStartedAt) / 1000);
+                log.debug("[计算A屏阶段] 使用独立时间: {}秒 (相对于A屏开始)", screenElapsedSeconds);
+            } else if ("B".equals(screenName) && screenBStartedAt > 0) {
+                // B屏：使用B屏的独立起始时间
+                long now = System.currentTimeMillis();
+                screenElapsedSeconds = (int) ((now - screenBStartedAt) / 1000);
+                log.debug("[计算B屏阶段] 使用独立时间: {}秒 (相对于B屏开始)", screenElapsedSeconds);
+            }
         }
 
         int accumulatedTime = 0;
@@ -879,10 +930,10 @@ public class TimerEngine {
                 }
             }
 
-            if (totalElapsedSeconds < accumulatedTime + stageDuration) {
+            if (screenElapsedSeconds < accumulatedTime + stageDuration) {
                 currentStageIndex = i;
                 currentStage = stage;
-                stageElapsed = totalElapsedSeconds - accumulatedTime;
+                stageElapsed = screenElapsedSeconds - accumulatedTime;
                 stageRemaining = stageDuration - stageElapsed;
                 break;
             }
