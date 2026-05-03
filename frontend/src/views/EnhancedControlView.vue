@@ -10,7 +10,7 @@
             <el-icon><Trophy /></el-icon>
             <span>比赛类型</span>
           </div>
-          <div class="section-content">
+          <div class="section-content" style="min-height: 90px;">
             <el-select
               v-model="selectedMatchType"
               placeholder="请选择比赛类型"
@@ -28,8 +28,8 @@
             </el-select>
 
             <!-- 比赛类型描述 -->
-            <div class="match-type-desc" v-if="currentMatchType">
-              {{ currentMatchType.description }}
+            <div class="match-type-desc">
+              {{ currentMatchType?.description || '' }}
             </div>
 
             <!-- 运行中禁用提示 -->
@@ -40,7 +40,7 @@
         </div>
 
         <!-- 时间配置 -->
-        <div class="control-section">
+        <div class="control-section time-config-section">
           <div class="section-header">
             <el-icon><Clock /></el-icon>
             <span>时间配置</span>
@@ -98,28 +98,32 @@
         </div>
 
         <!-- 屏幕控制模式 -->
-        <div class="control-section">
+        <div class="control-section"  style="min-height: 150px;">
           <div class="section-header">
             <el-icon><Monitor /></el-icon>
             <span>屏幕控制模式</span>
           </div>
           <div class="section-content">
-            <el-radio-group v-model="screenMode" :disabled="!canModifyConfig" @change="handleScreenModeChange">
-              <el-radio value="sync" border>同步模式</el-radio>
-              <el-radio value="alternate" border>AB交替模式</el-radio>
-              <el-radio value="only_a" border>仅A屏</el-radio>
-              <el-radio value="only_b" border>仅B屏</el-radio>
+            <el-radio-group v-model="screenMode" :disabled="!canModifyConfig" @change="handleScreenModeChange" class="screen-mode-group">
+              <div class="screen-mode-row">
+                <el-radio value="sync" border>同步模式</el-radio>
+                <el-radio value="alternate" border>AB交替模式</el-radio>
+              </div>
+              <div class="screen-mode-row">
+                <el-radio value="only_a" border>仅A屏</el-radio>
+                <el-radio value="only_b" border>仅B屏</el-radio>
+              </div>
             </el-radio-group>
           </div>
         </div>
 
         <!-- AB屏提示文案 -->
-        <div class="control-section">
+        <div class="control-section" style="min-height: 130px;">
           <div class="section-header">
             <el-icon><Edit /></el-icon>
             <span>AB屏提示文案</span>
           </div>
-          <div class="section-content">
+          <div class="section-content prompt-row">
             <div class="prompt-item">
               <label>A屏提示</label>
               <el-input
@@ -232,24 +236,25 @@
             <!-- 鸣笛说明 -->
             <div class="buzzer-info">
               <div class="buzzer-item">
-                <span class="buzzer-count">1声</span>
+                <span class="buzzer-count">2声</span>
                 <span class="buzzer-desc">准备阶段</span>
               </div>
               <div class="buzzer-item">
-                <span class="buzzer-count">2声</span>
+                <span class="buzzer-count">1声</span>
                 <span class="buzzer-desc">比赛阶段</span>
               </div>
               <div class="buzzer-item">
-                <span class="buzzer-count">3声</span>
-                <span class="buzzer-desc">黄灯阶段</span>
+                <span class="buzzer-count">2声</span>
+                <span class="buzzer-desc">红灯停射</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- AB交替规则说明 -->
-        <div class="control-section" v-if="screenMode === 'alternate' && currentMatchType">
-          <div class="section-header">
+<!--        <div class="control-section rule-section" :style="{ visibility: (screenMode === 'alternate' && currentMatchType) ? 'visible' : 'hidden' }">-->
+      <div class="control-section rule-section" >
+        <div class="section-header">
             <el-icon><InfoFilled /></el-icon>
             <span>AB交替规则</span>
           </div>
@@ -262,11 +267,11 @@
               <el-icon><CircleCheckFilled /></el-icon>
               <span><strong>绿灯阶段初始状态</strong>：A屏开始倒计时，B屏暂停</span>
             </div>
-            <div v-if="currentMatchType.category === 'individual'" class="rule-item">
+            <div v-if="currentMatchType?.category === 'individual'" class="rule-item">
               <el-icon><SwitchFilled /></el-icon>
               <span><strong>个人赛切换规则</strong>：切换时原屏清零，新屏从初始时间开始</span>
             </div>
-            <div v-if="currentMatchType.category === 'team' || currentMatchType.category === 'mixed_team'" class="rule-item">
+            <div v-if="currentMatchType?.category === 'team' || currentMatchType?.category === 'mixed_team'" class="rule-item">
               <el-icon><SwitchFilled /></el-icon>
               <span><strong>团队赛切换规则</strong>：切换时原屏暂停保留时间，新屏继续</span>
             </div>
@@ -1096,22 +1101,43 @@ const subscribeToTopics = () => {
   display: flex;
   height: 100%;
   gap: 20px;
-  overflow: hidden; /* 防止容器溢出 */
+  overflow: visible;
 }
 
 /* 左侧控制面板 */
+/* 核心：给左侧面板设置高度 + 滚动规则 */
 .control-left-panel {
-  flex: 0 0 auto;
-  width: 450px; /* 自适应宽度，min/max可根据需要调整 */
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background-color: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  /* 1. 设置固定高度/最大高度（根据布局场景选其一） */
+  /* 方式1：固定高度（适配固定布局） */
+  height: 100vh;
+  /* 方式2：弹性布局下的高度（适配父容器为flex） */
+  /* flex: 0 0 400px; */
+  /* max-height: calc(100vh - 40px); */
+
+  /* 2. 开启垂直滚动，隐藏水平滚动 */
   overflow-y: auto;
-  max-height: 100%; /* 确保不超过容器高度 */
+  overflow-x: hidden;
+
+  /* 3. 防止滚动条挤压内容（可选，美化） */
+  scrollbar-width: thin; /* 火狐 */
+  scrollbar-color: #ccc #f5f5f5; /* 火狐 */
+
+  /* 4. 确保面板不会被弹性布局挤压 */
+  min-width: 380px; /* 防止宽度被压缩 */
+  box-sizing: border-box; /* 内边距不影响高度计算 */
+  padding: 0 10px; /* 可选，优化内边距 */
+}
+
+/* 美化滚动条（Chrome/Safari） */
+.control-left-panel::-webkit-scrollbar {
+  width: 6px;
+}
+.control-left-panel::-webkit-scrollbar-track {
+  background: #f5f5f5;
+}
+.control-left-panel::-webkit-scrollbar-thumb {
+  background-color: #ccc;
+  border-radius: 3px;
 }
 
 /* 右侧显示区域 */
@@ -1159,6 +1185,7 @@ const subscribeToTopics = () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-height: 200px;
 }
 
 .time-config-item {
@@ -1192,8 +1219,14 @@ const subscribeToTopics = () => {
 }
 
 /* 提示文案样式 */
+.prompt-row {
+  display: flex;
+  gap: 12px;
+}
+
 .prompt-item {
-  margin-bottom: 12px;
+  flex: 1;
+  min-width: 0;
 }
 
 .prompt-item label {
@@ -1599,6 +1632,7 @@ const subscribeToTopics = () => {
   font-size: 12px;
   color: #909399;
   line-height: 1.4;
+  height: 18px;
 }
 
 /* 屏幕控制模式单选组特殊样式 */
@@ -1608,10 +1642,26 @@ const subscribeToTopics = () => {
   gap: 8px;
 }
 
+.screen-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.screen-mode-row {
+  display: flex;
+  gap: 8px;
+  width: 380px;
+}
+
+.screen-mode-row .el-radio {
+  flex: 1;
+}
+
 .el-radio {
   margin: 0;
   flex: 1;
-  min-width: 80px;
+  min-width: 100px;
 }
 
 /* 响应式调整 */
@@ -1702,6 +1752,13 @@ const subscribeToTopics = () => {
   .screen-preview {
     min-height: 260px;
     max-height: 340px;
+  }
+  /* 时间配置区域基础样式 */
+  .time-config-section {
+    /* 移除固定高度，改为最小高度 */
+    min-height: 120px;
+    /* 允许容器自适应内容 */
+    height: auto;
   }
 }
 </style>
