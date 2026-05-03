@@ -346,7 +346,7 @@ public class TimerEngine {
         // ✅ 修复：基于首次启动标记触发准备阶段鸣笛 (buzz1)
         if (isFirstStart) {
             log.info("🔔 首次启动计时器，触发buzz1鸣笛 - 进入准备阶段");
-            triggerBuzzer("buzz1");
+            triggerBuzzer("buzz2");
         }
 
         notifyStateChange();
@@ -675,13 +675,13 @@ public class TimerEngine {
         log.info("AB屏切换规则执行: {} -> {}", currentScreen, newScreen);
 //        screenElapsedAtSwitch = now;
         // 1. 保存当前屏幕的剩余时间
-        if ("A".equals(currentScreen)) {
-            screenATimerRemaining = calculateRemainingTimeForScreen("A", now);
-            log.debug("保存A屏剩余时间: {}秒", screenATimerRemaining);
-        } else {
-            screenBTimerRemaining = calculateRemainingTimeForScreen("B", now);
-            log.debug("保存B屏剩余时间: {}秒", screenBTimerRemaining);
-        }
+//        if ("A".equals(currentScreen)) {
+//            screenATimerRemaining = calculateRemainingTimeForScreen("A", now);
+//            log.debug("保存A屏剩余时间: {}秒", screenATimerRemaining);
+//        } else {
+//            screenBTimerRemaining = calculateRemainingTimeForScreen("B", now);
+//            log.debug("保存B屏剩余时间: {}秒", screenBTimerRemaining);
+//        }
 
         // ✅ 改进：计时结束（finished状态）时的特殊处理
         // 此时计时器已停止（isTimerRunning=false），无法再计算经过时间
@@ -783,6 +783,7 @@ public class TimerEngine {
                 screenATimerRemaining = currentState.getCompetitionTime(); // A屏重新开始
                 screenATimerPausedAt = 0;             // A屏运行
                 screenAStartedAt = now - currentState.getPreparationTime() * 1000;
+                currentState.setScreenARemaining((int) screenATimerRemaining);
                 log.info("个人赛切换: B屏清零(0秒)，A屏重新开始({}秒)",
                         screenATimerRemaining);
             } else {
@@ -795,6 +796,7 @@ public class TimerEngine {
                 screenBTimerPausedAt = 0;             // B屏运行
                 screenBCurrentStageColor = "";
                 screenBStartedAt = now - currentState.getPreparationTime() * 1000;
+                currentState.setScreenBRemaining((int) screenBTimerRemaining);
                 log.info("个人赛切换: A屏清零(0秒)，B屏重新开始({}秒)",
                         screenBTimerRemaining);
             }
@@ -869,7 +871,8 @@ public class TimerEngine {
 
         log.info("屏幕切换完成 => 当前活动屏幕: {}, A剩余: {}秒, B剩余: {}秒",
                 newScreen, screenATimerRemaining, screenBTimerRemaining);
-
+        //切换屏幕一声鸣笛提醒开始
+        triggerBuzzer("buzz1");
         startTimerTask();
         log.debug("屏幕切换完成 => 启动定时器");
 
@@ -1054,7 +1057,8 @@ public class TimerEngine {
                         // B屏的灯色和状态必须由calculateScreenStage()计算才能正确
                         // 这样才能显示绿灯颜色而不是红灯
                         screenATimerRemaining = totalRemainingSeconds;  // A屏处于倒计时状态
-                        screenBTimerRemaining = compTimeVal;            // B屏处于暂停状况显示时间是绿灯初始时间
+//                        screenBTimerRemaining = compTimeVal;            // B屏处于暂停状况显示时间是绿灯初始时间
+                        screenBTimerRemaining = 0;
                         calculateScreenStage("A", totalRemainingSeconds,"running");
                         calculateScreenStage("B", compTimeVal,"paused");
                         log.info("[AB交替-个人赛] A屏活跃倒计时中，B屏应清零并显示绿灯");
@@ -1063,7 +1067,8 @@ public class TimerEngine {
                         //团队模式如果首次切换 B屏的screenBStartedAt 应当等于当前，暂停时间应该等于从A屏启动时间
                     } else {
                         // B屏活跃时倒计时，A屏清零并显示绿灯
-                        screenATimerRemaining = compTimeVal;                      // B屏处于倒计时状态
+//                        screenATimerRemaining = compTimeVal;                      // B屏处于倒计时状态
+                        screenATimerRemaining = 0;
                         screenBTimerRemaining = totalRemainingSeconds;            // A屏处于暂停状况显示时间是绿灯初始时间
                         calculateScreenStage("A", compTimeVal,"paused");
                         calculateScreenStage("B", totalRemainingSeconds,"running");
@@ -1487,7 +1492,7 @@ public class TimerEngine {
             } else if (previousStageIndex == 0 && currentStageIndex == 1) {
                 // 准备阶段 -> 比赛阶段
                 log.info("🔴 -> 🟢 准备阶段 -> 比赛阶段，触发buzz2鸣笛");
-                triggerBuzzer("buzz2");
+                triggerBuzzer("buzz1");
             } else if (currentStageIndex == -1) {
                 // 所有阶段结束，计时完成
                 log.info("⏹️ 所有阶段结束，计时完成");
@@ -1500,7 +1505,7 @@ public class TimerEngine {
         // 黄灯状态变化声音提示（比赛阶段进入黄灯）
         if (yellowLightChanged && isYellowLight) {
             log.info("🟢 -> 🟡 比赛阶段进入黄灯预警 - 剩余时间: {} 秒", stageRemaining);
-            triggerBuzzer("buzz3");
+//            triggerBuzzer("buzz3");
         } else if (yellowLightChanged && !isYellowLight) {
             log.debug("[阶段更新] 退出黄灯状态");
         }
@@ -1612,6 +1617,8 @@ public class TimerEngine {
         } else {
             log.info("计时结束 - 比赛类型: {}", currentMatchType != null ? currentMatchType.getName() : "未知");
         }
+        //切换回红灯，鸣笛2声 停止射击
+        triggerBuzzer("buzz2");
         stopTimerTask();
         notifyStateChange();
     }

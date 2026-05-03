@@ -170,12 +170,18 @@
               </div>
               <!-- 第二行：重置/切换 -->
               <div class="button-row">
+<!--                <el-button-->
+<!--                  type="danger"-->
+<!--                  size="large"-->
+<!--                  :icon="RefreshRight"-->
+<!--                  :disabled="!canReset"-->
+<!--                  @click="resetTimer"-->
+<!--                >-->
                 <el-button
-                  type="danger"
-                  size="large"
-                  :icon="RefreshRight"
-                  :disabled="!canReset"
-                  @click="resetTimer"
+                        type="danger"
+                        size="large"
+                        :icon="RefreshRight"
+                        @click="resetTimer"
                 >
                   重置
                 </el-button>
@@ -315,10 +321,10 @@
               <!-- 倒计时时间 -->
               <div class="screen-timer">
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                  <div class="timer-label">A屏剩余11</div>
+                  <div class="timer-label">剩余时间</div>
                   <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
                   <!-- <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>  -->
-                  <div class="stage-timer">{{ timerState.screenARemaining }}</div>
+                  <div class="timer-value">{{ timerState.screenARemaining }}</div>
               </div>
 
               <!-- 屏幕状态标签 -->
@@ -369,7 +375,7 @@
               <!-- 倒计时时间 -->
               <div class="screen-timer">
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                <div class="timer-label">B屏剩余22</div>
+                <div class="timer-label">剩余时间</div>
                 <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
                 <!--  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>  -->
                 <div class="timer-value">{{ timerState.screenBRemaining }}</div>
@@ -772,6 +778,13 @@ const resetABScreenState = () => {
 }
 
 const updateTimeConfig = () => {
+
+  if (yellowLightTime.value > 0 && competitionTime.value <= yellowLightTime.value) {
+    logService.info('比赛时间应大于黄灯时间')
+    ElMessage.warning('比赛时间应大于黄灯时间')
+    return
+  }
+
   if (!timerStore.connectionState.isConnected) {
     logService.warn('📡 [Control] WebSocket未连接，无法发送时间配置')
     return
@@ -813,6 +826,11 @@ const updateTimeConfig = () => {
 
 const onTimeConfigBlur = () => {
   // ✅ 失焦时同步到后端
+  if (yellowLightTime.value > 0 && competitionTime.value <= yellowLightTime.value) {
+    logService.info('比赛时间应大于黄灯时间')
+    ElMessage.warning('比赛时间应大于黄灯时间')
+    return
+  }
   // 用户编辑完毕，发送配置给后端进行处理和验证
   if (!timerStore.connectionState.isConnected) {
     logService.warn('未连接到服务器，无法同步时间配置')
