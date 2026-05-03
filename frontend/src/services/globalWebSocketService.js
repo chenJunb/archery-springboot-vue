@@ -116,13 +116,78 @@ function validateTimerState(data) {
 /**
  * 订阅所有主题
  */
+/**
+ * 订阅计时器状态主题
+ * ✅ 新增：延迟订阅，在AB屏模式设置后再订阅
+ */
+export function subscribeToTimerState() {
+  if (!globalStompClient || !globalStompClient.connected) {
+    logService.warn('STOMP 客户端未连接，无法订阅计时器状态主题')
+    return
+  }
+
+  logService.info('订阅计时器状态主题: /topic/timer-state')
+
+  // 订阅计时器状态（广播）
+  globalStompClient.subscribe('/topic/timer-state', (message) => {
+    try {
+      const data = JSON.parse(message.body)
+      const timerData = data.data || data
+
+//      logService.debug('📡 收到 /topic/timer-state 广播消息')
+      logService.debug('📡 收到 /topic/timer-state 广播消息', { body: message.body, timerData })
+      broadcastMessage('timer_state', timerData)
+    } catch (error) {
+      logService.error('解析计时器状态失败', { error: error.message })
+    }
+  })
+
+  logService.info('✅ 计时器状态订阅已建立')
+}
+
+/**
+ * 订阅其他主题（不涉及计时状态的主题）
+ * ✅ 改进：独立订阅客户端状态和调试主题
+ */
+function subscribeToOtherTopics() {
+  if (!globalStompClient || !globalStompClient.connected) {
+    logService.warn('STOMP 客户端未连接，无法订阅其他主题')
+    return
+  }
+
+  logService.info('订阅其他主题: /topic/clients, /topic/debug')
+
+  // 订阅客户端状态
+  globalStompClient.subscribe('/topic/clients', (message) => {
+    try {
+      const data = JSON.parse(message.body)
+      logService.debug('收到客户端状态', { clientCount: data.clients?.length })
+      broadcastMessage('client_status', data)
+    } catch (error) {
+      logService.error('解析客户端状态失败', { error: error.message })
+    }
+  })
+
+  // 订阅调试主题
+  globalStompClient.subscribe('/topic/debug', (message) => {
+    try {
+      const data = JSON.parse(message.body)
+      logService.debug('🔧 收到调试消息', { type: data.type })
+    } catch (error) {
+      logService.error('解析调试消息失败', { error: error.message })
+    }
+  })
+
+  logService.info('✅ 其他主题订阅已建立')
+}
+
 function subscribeToAllTopics() {
   if (!globalStompClient || !globalStompClient.connected) {
     logService.warn('STOMP 客户端未连接，无法订阅主题')
     return
   }
 
-  logService.info('开始订阅所有主题')
+  logService.info('开始订阅初始主题（计时器状态主题延迟订阅）')
 
   // 重置订阅状态
   userQueueSubscribed = false
@@ -189,49 +254,18 @@ function subscribeToAllTopics() {
     logService.error('❌ 订阅个人队列失败', { error: error.message })
   }
 
-  // 订阅计时器状态（广播）
-  globalStompClient.subscribe('/topic/timer-state', (message) => {
-    try {
-      const data = JSON.parse(message.body)
-      const timerData = data.data || data
+  // ✅ 新增：立即订阅其他主题（不涉及计时状态）
+  subscribeToOtherTopics()
 
-      logService.debug('📡 收到 /topic/timer-state 广播消息')
-      broadcastMessage('timer_state', timerData)
-    } catch (error) {
-      logService.error('解析计时器状态失败', { error: error.message })
-    }
-  })
-
-  // 订阅客户端状态
-  globalStompClient.subscribe('/topic/clients', (message) => {
-    try {
-      const data = JSON.parse(message.body)
-      logService.debug('收到客户端状态', { clientCount: data.clients?.length })
-      broadcastMessage('client_status', data)
-    } catch (error) {
-      logService.error('解析客户端状态失败', { error: error.message })
-    }
-  })
-
-  // 订阅调试主题
-  globalStompClient.subscribe('/topic/debug', (message) => {
-    try {
-      const data = JSON.parse(message.body)
-      logService.debug('🔧 收到调试消息', { type: data.type })
-    } catch (error) {
-      logService.error('解析调试消息失败', { error: error.message })
-    }
-  })
-
-  logService.info('所有主题订阅完成')
-  logService.event('WEB_SOCKET_SUBSCRIPTIONS_COMPLETE', {
+  logService.info('初始主题订阅完成（等待AB屏模式设置后再订阅计时器状态）')
+  logService.event('WEB_SOCKET_INITIAL_SUBSCRIPTIONS_COMPLETE', {
     timestamp: new Date().toISOString()
   })
 
   // ✅ 关键：等待订阅完全生效后再注册
   setTimeout(() => {
     if (globalStompClient && globalStompClient.connected) {
-      logService.debug('📤 订阅已生效，现在发送注册请求')
+      logService.debug('📤 初始订阅已生效，现在发送注册请求')
       const clientType = getClientTypeFromRoute()
       const clientName = getClientName(clientType)
 
@@ -252,25 +286,39 @@ function subscribeToAllTopics() {
 }
 
 /**
- * 启动心跳
- */
-/**
- * 启动心跳
- * ✅ 改进：STOMP客户端已内置心跳机制（15秒），无需额外实现
+ * 启动应用层心跳（每60秒发送一次，防止长时间无操作断连）
  */
 function startHeartbeat() {
-  logService.info('STOMP心跳已启用（由STOMP客户端管理）')
-  // STOMP客户端通过heartbeatIncoming和heartbeatOutgoing自动管理
-  // 无需额外实现
+  stopHeartbeat()
+  heartbeatInterval = setInterval(() => {
+    if (globalStompClient && globalStompClient.connected) {
+      try {
+        globalStompClient.publish({
+          destination: '/app/heartbeat',
+          body: JSON.stringify({
+            clientId: globalConnectionState.clientId,
+            clientType: globalConnectionState.clientType,
+            timestamp: Date.now()
+          })
+        })
+        logService.debug('💓 应用层心跳已发送')
+      } catch (e) {
+        logService.warn('应用层心跳发送失败', { error: e.message })
+      }
+    }
+  }, 60000) // 每60秒发送一次
+  logService.info('应用层心跳已启动（60s间隔）')
 }
 
 /**
- * 停止心跳
- * ✅ 改进：由STOMP客户端自动管理
+ * 停止应用层心跳
  */
 function stopHeartbeat() {
-  logService.info('STOMP心跳将随连接关闭而停止')
-  // 不需要手动停止，连接关闭时自动停止
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
+    logService.info('应用层心跳已停止')
+  }
 }
 
 /**

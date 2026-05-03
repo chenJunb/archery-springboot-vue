@@ -34,5 +34,5 @@ archery:
       allowed-origins: "http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
     # WebSocket超时时间（24小时）
     websocket-timeout: 86400000
-    # 控制端心跳超时时间（30秒）
-    control-heartbeat-timeout: 30000
+    # 控制端心跳超时时间（120秒）
+    control-heartbeat-timeout: 120000

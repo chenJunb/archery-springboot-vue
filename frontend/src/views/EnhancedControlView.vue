@@ -302,7 +302,7 @@
           <div class="screen-content">
             <!-- 提示文案 -->
             <div class="screen-prompt">
-              {{ timerState.aPrompt || 'A屏提示' }}
+              {{ timerState.aprompt || '选手A准备' }}
             </div>
 
             <!-- 屏幕状态 -->
@@ -315,15 +315,10 @@
               <!-- 倒计时时间 -->
               <div class="screen-timer">
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                <template v-if="screenMode === 'alternate'">
-                  <div class="timer-label">A屏剩余</div>
+                  <div class="timer-label">A屏剩余11</div>
                   <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
-                  <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>
-                </template>
-                <template v-else>
-                  <div class="timer-label">剩余秒数</div>
-                  <div class="timer-value">{{ Math.round(displayRemaining) }}</div>
-                </template>
+                  <!-- <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>  -->
+                  <div class="stage-timer">{{ timerState.screenARemaining }}</div>
               </div>
 
               <!-- 屏幕状态标签 -->
@@ -338,7 +333,9 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.screenAStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
+              <!--  <div class="stage-timer">{{ timerState.screenARemaining }}</div>  -->
+              <!--  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  -->
+              <div class="stage-timer">{{ timerState.screenARemaining }}</div>
             </div>
           </div>
         </div>
@@ -359,7 +356,7 @@
           <div class="screen-content">
             <!-- 提示文案 -->
             <div class="screen-prompt">
-              {{ timerState.bPrompt || 'B屏提示' }}
+              {{ timerState.bprompt || '选手B准备' }}
             </div>
 
             <!-- 屏幕状态 -->
@@ -372,15 +369,10 @@
               <!-- 倒计时时间 -->
               <div class="screen-timer">
                 <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                <template v-if="screenMode === 'alternate'">
-                  <div class="timer-label">B屏剩余</div>
-                  <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
-                  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>
-                </template>
-                <template v-else>
-                  <div class="timer-label">剩余秒数</div>
-                  <div class="timer-value">{{ Math.round(displayRemaining) }}</div>
-                </template>
+                <div class="timer-label">B屏剩余22</div>
+                <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
+                <!--  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>  -->
+                <div class="timer-value">{{ timerState.screenBRemaining }}</div>
               </div>
 
               <!-- 屏幕状态标签 -->
@@ -395,7 +387,9 @@
             <!-- 当前阶段信息 -->
             <div class="stage-info">
               <div class="stage-name">{{ timerState.screenBStageName || '准备阶段' }}</div>
-              <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
+              <!--  <div class="stage-timer">{{ timerState.screenBRemaining }}</div>  -->
+              <!--  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  -->
+              <div class="stage-timer">{{ timerState.screenBRemaining }}</div>
             </div>
           </div>
         </div>
@@ -481,6 +475,7 @@ import { ElMessage } from 'element-plus'
 import { useEnhancedTimerStore } from '../stores/enhancedTimer'
 import { useBuzzer } from '../composables/useBuzzer'
 import { logService } from '../services/logService'
+import { subscribeToTimerState } from '../services/globalWebSocketService'
 import {
   Trophy, Clock, Monitor, Edit, Setting, VideoPlay, VideoPause,
   RefreshRight, Switch, Bell, Headset, CopyDocument, InfoFilled,
@@ -679,9 +674,9 @@ const loadMatchTypeConfig = (matchType) => {
 
   // ✅ 严格遵循"后端单一数据源"原则
   // 更新本地输入框的值（这些是UI控件）
-  preparationTime.value = matchType.preparationTime || 10
+  preparationTime.value = matchType.preparationTime ?? 10
   competitionTime.value = matchType.competitionTime || 180
-  yellowLightTime.value = matchType.yellowLightTime || 30
+  yellowLightTime.value = matchType.yellowLightTime ?? 30
 
   // 设置AB屏模式
   screenMode.value = matchType.defaultScreenMode || 'alternate'
@@ -748,6 +743,12 @@ const handleScreenModeChange = (mode) => {
       // ✅ 关键修复：屏幕模式变更后发送后端重置消息
       logService.info('屏幕模式已变更，发送后端重置消息', { mode })
       timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+
+      // ✅ 新增：延迟订阅计时器状态主题（确保AB模式已设置）
+      setTimeout(() => {
+        logService.debug('📡 AB屏模式设置后，订阅计时器状态主题')
+        subscribeToTimerState()
+      }, 100)
     } catch (error) {
       logService.error('设置屏幕模式失败', { error: error.message })
       ElMessage.error('设置屏幕模式失败，请重试')

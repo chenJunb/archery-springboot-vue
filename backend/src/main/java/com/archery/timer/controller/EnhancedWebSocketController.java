@@ -297,23 +297,25 @@ public class EnhancedWebSocketController {
         String clientId = (String) payload.get("clientId");
         log.info("收到切换AB屏请求，客户端: {}", clientId);
 
-        // ✅ 验证clientId不为空
-        if (clientId == null || clientId.isEmpty()) {
-            log.error("❌ 无效的客户端ID，无法切换AB屏");
-            return timerEngine.getState();
-        }
-
-        // ✅ 权限检查：只有控制端可以切换屏幕
-        if (!webSocketService.isControlClient(clientId)) {
-            log.warn("⚠️ 非控制端尝试切换AB屏: {}", clientId);
-            logFileManager.logError(clientId, "display", "TOGGLE_AB_SCREEN",
-                "权限不足：只有控制端可以切换AB屏", null);
-            return timerEngine.getState();  // 返回当前状态，不做任何改变
-        }
+        clientId = clientId == null ? "暂未传输" : clientId;
+//
+//        // ✅ 验证clientId不为空
+//        if (clientId == null || clientId.isEmpty()) {
+//            log.error("❌ 无效的客户端ID，无法切换AB屏");
+//            return timerEngine.getState();
+//        }
+//
+//        // ✅ 权限检查：只有控制端可以切换屏幕
+//        if (!webSocketService.isControlClient(clientId)) {
+//            log.warn("⚠️ 非控制端尝试切换AB屏: {}", clientId);
+//            logFileManager.logError(clientId, "display", "TOGGLE_AB_SCREEN",
+//                "权限不足：只有控制端可以切换AB屏", null);
+//            return timerEngine.getState();  // 返回当前状态，不做任何改变
+//        }
 
         // ✅ 执行切换操作，toggleABScreen()本身是synchronized的，保证原子性
         try {
-            log.info("✅ 控制端切换AB屏 - clientId: {}", clientId);
+            log.info("✅ 控制端切换AB屏 ", clientId);
             timerEngine.toggleABScreen();
             logFileManager.logClientAction(clientId, "control", "TOGGLE_AB_SCREEN", "success");
             return timerEngine.getState();
@@ -372,70 +374,12 @@ public class EnhancedWebSocketController {
 
         log.info("收到设置时间配置请求: 准备={}s, 比赛={}s, 黄灯={}s", preparation, competition, yellowLight);
 
-        // ✅ 关键修复：直接修改TimerEngine中的currentState
-        // 这样可以确保修改被永久保存，不会被后续操作覆盖
-        if (preparation != null && preparation >= 0) {
-            timerEngine.getCurrentState().setPreparationTime(Math.max(0, preparation));
-            log.info("✅ 准备时间已更新: {}s", preparation);
-        }
+        // ✅ 原子性修改，避免与定时广播竞态
+        timerEngine.setTimeConfig(preparation, competition, yellowLight);
 
-        if (competition != null && competition >= 0) {
-            timerEngine.getCurrentState().setCompetitionTime(Math.max(0, competition));
-            log.info("✅ 比赛时间已更新: {}s", competition);
-        }
-
-        if (yellowLight != null && yellowLight >= 0) {
-            // ✅ 新增验证：黄灯时间必须小于比赛时间（不能等于或超过）
-            Integer compTime = timerEngine.getCurrentState().getCompetitionTime();
-            if (compTime != null && yellowLight >= compTime) {
-                log.warn("⚠️ 黄灯时间({}s)必须小于比赛时间({}s)，已调整为比赛时间-1秒", yellowLight, compTime);
-                yellowLight = Math.max(0, compTime - 1);
-            }
-            timerEngine.getCurrentState().setYellowLightTime(Math.max(0, yellowLight));
-            log.info("✅ 黄灯时间已更新: {}s", yellowLight);
-        } else {
-            // ✅ 新增验证：如果只修改了比赛时间，需要检查现有的黄灯时间是否大于等于新的比赛时间
-            if (competition != null) {
-                Integer existingYellowLight = timerEngine.getCurrentState().getYellowLightTime();
-                if (existingYellowLight != null && existingYellowLight >= competition) {
-                    log.warn("⚠️ 现有黄灯时间({}s)必须小于新的比赛时间({}s)，已调整为新的比赛时间-1秒", existingYellowLight, competition);
-                    timerEngine.getCurrentState().setYellowLightTime(Math.max(0, competition - 1));
-                }
-            }
-        }
-
-        // ✅ 更新总时间（用于总计时）
-        Integer prepTime = timerEngine.getCurrentState().getPreparationTime();
-        Integer compTime = timerEngine.getCurrentState().getCompetitionTime();
-        if (prepTime != null && compTime != null) {
-            int totalTime = prepTime + compTime;
-            timerEngine.getCurrentState().setTotalRemaining(totalTime);
-            log.info("✅ 总时间已更新: {}s", totalTime);
-        }
-
-        // ✅ 如果当前是准备阶段（idle状态），也更新当前阶段的剩余时间
-        if ("idle".equals(timerEngine.getCurrentState().getStatus()) &&
-            (timerEngine.getCurrentState().getCurrentStageIndex() == null ||
-             timerEngine.getCurrentState().getCurrentStageIndex() == 0)) {
-            if (prepTime != null) {
-                timerEngine.getCurrentState().setCurrentStageRemaining(prepTime);
-                log.info("✅ 准备阶段剩余时间已更新: {}s", prepTime);
-            }
-        }
-
-        // ✅ 新增：如果正在运行并且处于比赛阶段，也需要重新计算剩余时间
-        // 但由于阶段计算在updateTimerTask中进行，这里暂不修改
-        // 下一次updateTimerTask会根据新的配置重新计算
-
-        // 获取更新后的完整状态进行广播
         TimerStateDTO updatedState = timerEngine.getState();
-        updatedState.setTimestamp(System.currentTimeMillis());
-
         log.info("✅ 时间配置已保存并广播 - 准备: {}s, 比赛: {}s, 黄灯: {}s",
-            updatedState.getPreparationTime(),
-            updatedState.getCompetitionTime(),
-            updatedState.getYellowLightTime());
-
+            updatedState.getPreparationTime(), updatedState.getCompetitionTime(), updatedState.getYellowLightTime());
         return updatedState;
     }
 
@@ -660,6 +604,18 @@ public class EnhancedWebSocketController {
         TimerStateDTO state = timerEngine.getState();
         messagingTemplate.convertAndSend("/topic/timer-state", state);
         return state;
+    }
+
+    /**
+     * 处理客户端应用层心跳，更新控制端最后活跃时间
+     */
+    @MessageMapping("/heartbeat")
+    public void handleHeartbeat(Map<String, Object> payload) {
+        String clientId = payload != null ? (String) payload.get("clientId") : null;
+        if (clientId != null) {
+            webSocketService.updateHeartbeat(clientId);
+            log.debug("💓 收到心跳 clientId: {}", clientId);
+        }
     }
 
     /**

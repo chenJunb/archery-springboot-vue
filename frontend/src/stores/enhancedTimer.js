@@ -12,7 +12,8 @@ import {
   sendGlobalWebSocketMessage,
   subscribeToTopic,
   disconnectGlobalWebSocket,
-  getGlobalStompClient
+  getGlobalStompClient,
+  subscribeToTimerState
 } from '../services/globalWebSocketService'
 import { logService } from '../services/logService'
 import { useBuzzer } from '../composables/useBuzzer'
@@ -210,7 +211,9 @@ function initMessageListeners() {
           yellowLightTime: data.yellowLightTime,
           currentStageRemaining: data.currentStageRemaining,
           screenARemaining: data.screenARemaining,
-          screenBRemaining: data.screenBRemaining
+          screenBRemaining: data.screenBRemaining,
+          aPrompt: data.aprompt,
+          bPrompt: data.bprompt
         })
 
         logService.event('TIMER_STATE_APPLIED', {
@@ -233,18 +236,22 @@ function initMessageListeners() {
           yellowLightTime: timerState.yellowLightTime,
           currentStageRemaining: timerState.currentStageRemaining,
           screenARemaining: timerState.screenARemaining,
-          screenBRemaining: timerState.screenBRemaining
+          screenBRemaining: timerState.screenBRemaining,
+          aPrompt: timerState.aprompt,
+          bPrompt: timerState.bprompt
         })
 
         // 同步本地计时 - 更新基准时间和剩余时间
         lastWebSocketUpdateTime = Date.now()
         lastWebSocketRemaining = data.currentStageRemaining || 0
         timerState.localDisplayRemaining = lastWebSocketRemaining
+        logService.debug('📋 状态监听与时间:', data.status,' ; localDisplayRemaining是：',timerState.localDisplayRemaining)
 
         // 根据计时器状态管理本地计时器
         if (data.status === 'running') {
           startLocalCountdown()
         } else if (data.status === 'paused' || data.status === 'idle' || data.status === 'finished') {
+          logService.debug('📋 状态监听停止:', data.status,' ; localDisplayRemaining是：',timerState.localDisplayRemaining)
           stopLocalCountdown()
         }
         break
@@ -594,7 +601,15 @@ export function useEnhancedTimerStore() {
 
   // 设置AB屏模式
   const setABMode = (mode) => {
+    logService.info('🔧 设置AB屏模式:', mode)
     sendGlobalWebSocketMessage('timer/set-ab-mode', { mode })
+
+    // ✅ 新增：AB屏模式设置后立即订阅计时器状态
+    // 这样确保计时器状态订阅是在AB屏模式确认后进行的
+    setTimeout(() => {
+      logService.info('📡 AB屏模式设置完成，现在订阅计时器状态')
+      subscribeToTimerState()
+    }, 100)
   }
 
   // 切换AB屏

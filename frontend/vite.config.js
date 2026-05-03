@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     port: 3000, // 使用3000端口
     host: 'localhost',
-    strictPort: false, // 如果端口被占用，自动使用其他端口
+    strictPort: true, // 强制使用3000端口，如果被占用则报错
     open: false, // 不自动打开浏览器
     proxy: {
       '/api': {

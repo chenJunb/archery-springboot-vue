@@ -126,6 +126,19 @@ public class WebSocketService {
     }
 
     /**
+     * 更新客户端心跳时间（应用层心跳）
+     */
+    public synchronized void updateHeartbeat(String clientId) {
+        ClientInfo client = clients.get(clientId);
+        if (client != null) {
+            client.setLastHeartbeat(LocalDateTime.now());
+            if ("control".equals(client.getClientType()) && clientId.equals(currentControlClientId)) {
+                lastControlHeartbeat = System.currentTimeMillis();
+            }
+        }
+    }
+
+    /**
      * 根据会话ID获取客户端ID
      * ✅ 修复8.1: 获取与会话关联的客户端
      */
@@ -162,20 +175,20 @@ public class WebSocketService {
         }
     }
 
-    /**
-     * 更新客户端心跳
-     */
-    public void updateHeartbeat(String clientId) {
-        ClientInfo client = clients.get(clientId);
-        if (client != null) {
-            client.setLastHeartbeat(LocalDateTime.now());
-
-            // 如果是控制端，更新控制端心跳
-            if (clientId.equals(currentControlClientId)) {
-                lastControlHeartbeat = System.currentTimeMillis();
-            }
-        }
-    }
+//    /**
+//     * 更新客户端心跳
+//     */
+//    public void updateHeartbeat(String clientId) {
+//        ClientInfo client = clients.get(clientId);
+//        if (client != null) {
+//            client.setLastHeartbeat(LocalDateTime.now());
+//
+//            // 如果是控制端，更新控制端心跳
+//            if (clientId.equals(currentControlClientId)) {
+//                lastControlHeartbeat = System.currentTimeMillis();
+//            }
+//        }
+//    }
 
     /**
      * 检查客户端是否有控制权限

@@ -84,8 +84,8 @@ public class TimerStateDTO {
         this.screenBEnabled = true;
         this.abMode = "alternate";
         this.activeScreen = "A";
-        this.aPrompt = "A屏";
-        this.bPrompt = "B屏";
+        this.aPrompt = "选手A准备";
+        this.bPrompt = "选手B准备";
         this.screenAStatus = "paused";
         this.screenBStatus = "paused";
     }
