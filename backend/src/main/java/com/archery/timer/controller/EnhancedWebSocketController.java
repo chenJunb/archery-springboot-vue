@@ -649,6 +649,6 @@ public class EnhancedWebSocketController {
             return false;
         }
         // 允许的客户端类型列表
-        return clientType.equals("control") || clientType.equals("display-a") || clientType.equals("display-b");
+        return clientType.equals("control") || clientType.equals("display_a") || clientType.equals("display_b");
     }
 }

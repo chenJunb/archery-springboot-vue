@@ -24,7 +24,7 @@ logging:
 custom:
   logging:
     directory: logs
-    max-files: 15
+    max-files: 7
 
 # WebSocket配置
 archery:

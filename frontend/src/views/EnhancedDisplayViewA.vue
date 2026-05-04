@@ -22,47 +22,28 @@
       <div class="center-display">
         <!-- 提示文案 -->
         <div class="screen-prompt">
-          {{ timerState.aPrompt || 'A屏提示文案' }}
+          {{ timerState.aprompt || '选手A准备' }}
         </div>
 
-        <!-- 圆形状态灯 -->
-        <div class="center-content">
-          <div
-            class="status-light"
-            :style="{
-              backgroundColor: currentLightColor,
-              boxShadow: `0 0 40px ${currentLightColor}50`
-            }"
-          >
-            <div class="light-inner"></div>
+        <!-- 屏幕状态 -->
+        <div class="screen-status">
+          <!-- 圆形状态灯 -->
+          <div class="status-light" :style="{ backgroundColor: currentLightColor, boxShadow: `0 0 40px ${currentLightColor}50` }">
+            <div class="light-glow"></div>
           </div>
 
           <!-- 倒计时时间 -->
-          <div class="time-display">
-            <!-- 仅显示纯数字秒数，不做任何时间格式化 -->
-            <!-- ✅ 修复：交替模式也使用统一的实时倒计时显示（参考同步模式），确保每秒更新 -->
-            <div class="time-value">{{ Math.round(displayRemaining) }}</div>
-            <div class="time-label">剩余秒数</div>
+          <div class="screen-timer">
+            <div class="timer-label">剩余时间</div>
+            <div class="timer-value">{{ timerState.screenARemaining }}</div>
           </div>
 
-          <!-- 屏幕状态标签 -->
-          <div class="screen-status-tag" :class="{
-            running: screenStatus === 'running',
-            paused: screenStatus !== 'running'
-          }">
-            {{ screenStatusText }}
-          </div>
         </div>
 
         <!-- 当前阶段信息 -->
         <div class="stage-info">
-          <div class="stage-label">当前阶段</div>
-          <div class="stage-details">
-            <div class="stage-name" :style="{ color: currentLightColor }">
-              {{ timerState.screenAStageName || '准备阶段' }}
-            </div>
-            <div class="stage-timer">{{ Math.round(displayRemaining) }}</div>
-          </div>
+          <div class="stage-name" :style="{ color: currentLightColor }">{{ timerState.screenAStageName || '准备阶段' }}</div>
+          <div class="stage-timer">{{ timerState.screenARemaining }}</div>
         </div>
       </div>
 
@@ -93,6 +74,13 @@
     <div class="sound-indicator" :class="{ muted: !timerState.soundEnabled }">
       <el-icon><Headset /></el-icon>
       <span>{{ timerState.soundEnabled ? '声音开' : '声音关' }}</span>
+    </div>
+    <!-- 屏幕状态标签 -->
+    <div class="screen-status-tag" :class="{
+                running: timerState.screenAStatus === 'running',
+                paused: timerState.screenAStatus !== 'running'
+              }">
+      {{ timerState.screenAStatus === 'running' ? '运行中' : '已暂停' }}
     </div>
 
     <!-- AB交替模式说明（当需要时显示） -->
@@ -126,6 +114,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useEnhancedTimerStore } from '../stores/enhancedTimer'
+import { subscribeToTimerState } from '../services/globalWebSocketService'
 import { useBuzzer } from '../composables/useBuzzer'
 import { logService } from '../services/logService'
 import { Connection, User, Timer, Clock, Headset, FullScreen, Close, CircleCheckFilled, SwitchFilled } from '@element-plus/icons-vue'
@@ -331,13 +320,11 @@ onMounted(() => {
     if (timerStore.connectionState.isConnected) {
       logService.debug('✅ WebSocket 已连接，立即订阅主题')
       timerStore.subscribeToTopics()
-
-      // ✅ 主动请求后端广播当前状态
-      // 确保页面加载时能立即显示最新的时间配置
+      subscribeToTimerState()
       timerStore.requestBroadcastState()
     } else {
       logService.debug('⏳ 等待 WebSocket 连接建立...')
-      setTimeout(checkAndSubscribe, 500)  // 每500ms检查一次
+      setTimeout(checkAndSubscribe, 500)
     }
   }
   checkAndSubscribe()
@@ -523,15 +510,23 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   font-size: 32px;
   font-weight: bold;
   text-align: center;
-  margin-bottom: 60px;
+  margin-bottom: 20px;
   color: #fff;
   text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
 }
 
-.center-content {
-  text-align: center;
+.screen-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
   position: relative;
-  margin-bottom: 60px;
+  flex-shrink: 0;
 }
 
 /* 状态灯 */
@@ -539,51 +534,53 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   width: 200px;
   height: 200px;
   border-radius: 50%;
-  margin: 0 auto 40px;
   position: relative;
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
-.light-inner {
+.light-glow {
   position: absolute;
-  top: 20px;
-  left: 20px;
-  right: 20px;
-  bottom: 20px;
+  top: 10px;
+  left: 10px;
+  width: 180px;
+  height: 180px;
   border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.1);
+  background: radial-gradient(circle at 30px 30px, rgba(255, 255, 255, 0.8), transparent);
+  filter: blur(8px);
 }
 
-/* 时间显示 */
-.time-display {
+.screen-timer {
   text-align: center;
+  flex-shrink: 0;
 }
 
-.time-value {
-  font-size: 96px;
-  font-weight: bold;
-  font-family: 'Courier New', monospace;
-  letter-spacing: 4px;
-  margin-bottom: 16px;
-  color: #fff;
-  text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
-}
-
-.time-label {
+.timer-label {
   font-size: 20px;
   color: #aaa;
   letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+
+.timer-value {
+  font-size: 96px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  color: #fff;
+  letter-spacing: 4px;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
 }
 
 /* 屏幕状态标签 */
 .screen-status-tag {
   position: absolute;
-  top: 0;
-  right: 0;
-  padding: 8px 20px;
-  border-radius: 20px;
-  font-size: 16px;
-  font-weight: 600;
+  top: 140px; /* 原top: 0，改为140px（声音指示器top是90px，高度约30px，140px刚好在其下方） */
+  right: 20px; /* 与声音指示器的right保持一致，确保对齐 */
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 100; /* 确保和声音指示器同层级，避免被遮挡 */
 }
 
 .screen-status-tag.running {
@@ -606,21 +603,14 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
 
 /* 阶段信息 */
 .stage-info {
-  text-align: center;
-  margin-top: 40px;
-}
-
-.stage-label {
-  font-size: 18px;
-  color: #aaa;
-  margin-bottom: 8px;
-}
-
-.stage-details {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  gap: 30px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 8px;
+  width: 100%;
+  max-width: 600px;
 }
 
 .stage-name {
@@ -628,12 +618,17 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 2px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stage-timer {
   font-size: 36px;
   font-family: 'Courier New', monospace;
   font-weight: bold;
+  color: #fff;
 }
 
 /* 底部状态栏 */
@@ -690,7 +685,7 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
 .sound-indicator {
   position: absolute;
   top: 90px;
-  right: 20px;
+  right: 20px; /* 与屏幕状态标签的right一致 */
   display: flex;
   align-items: center;
   gap: 8px;
@@ -700,6 +695,7 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   border-radius: 16px;
   font-size: 14px;
   color: #52c41a;
+  z-index: 100; /* 保持和屏幕状态标签同层级 */
 }
 
 .sound-indicator.muted {

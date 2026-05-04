@@ -344,10 +344,10 @@ public class TimerEngine {
         log.info("开始计时 - 比赛类型: {}, 控制端: {}", currentMatchType.getName(), controlClientId);
 
         // ✅ 修复：基于首次启动标记触发准备阶段鸣笛 (buzz1)
-        if (isFirstStart) {
-            log.info("🔔 首次启动计时器，触发buzz1鸣笛 - 进入准备阶段");
-            triggerBuzzer("buzz2");
-        }
+//        if (isFirstStart) {
+//            log.info("🔔 首次启动计时器，触发buzz1鸣笛 - 进入准备阶段");
+//            triggerBuzzer("buzz2");
+//        }
 
         notifyStateChange();
     }
@@ -894,7 +894,22 @@ public class TimerEngine {
     }
 
     /**
+     * 更新当前计时状态并推送广播
+     *
+     */
+    private void updateTimerStateAndSeedMsg(){
+        updateTimerState();
+        // ✅ 修复：确保通知状态变更
+        log.info("[计时器状态AB屏倒计时-2] A屏倒计时：{} ， B屏倒计时：{}" ,currentState.getScreenARemaining(),currentState.getScreenBRemaining());
+//        log.info("[计时器状态更新] 调用 notifyStateChange()" );
+        notifyStateChange();
+        log.info("[计时器状态AB屏倒计时-3] A屏倒计时：{} ， B屏倒计时：{}" ,currentState.getScreenARemaining(),currentState.getScreenBRemaining());
+        log.info("[计时器状态更新] notifyStateChange() 完成");
+    }
+
+    /**
      * 更新当前计时状态
+     * 方法锁，只做计算
      */
     private synchronized void updateTimerState() {
         log.debug("[计时器状态更新] 开始更新计时器状态，isTimerRunning: {}, isTimerPaused: {}, timerStartedAt: {}, lastUpdateAt: {}",
@@ -1144,13 +1159,6 @@ public class TimerEngine {
         currentState.setTimestamp(now);
 
         lastUpdateAt = now;
-
-        // ✅ 修复：确保通知状态变更
-        log.info("[计时器状态AB屏倒计时-2] A屏倒计时：{} ， B屏倒计时：{}" ,currentState.getScreenARemaining(),currentState.getScreenBRemaining());
-//        log.info("[计时器状态更新] 调用 notifyStateChange()" );
-        notifyStateChange();
-        log.info("[计时器状态AB屏倒计时-3] A屏倒计时：{} ， B屏倒计时：{}" ,currentState.getScreenARemaining(),currentState.getScreenBRemaining());
-        log.info("[计时器状态更新] notifyStateChange() 完成");
     }
 
     /**
@@ -1489,6 +1497,7 @@ public class TimerEngine {
                 // 初始状态 -> 准备阶段 (在startTimer时触发，这里可能不会发生)
                 // triggerBuzzer("buzz1"); // 在startTimer方法中处理
                 log.debug("[阶段更新] 初始状态 -> 准备阶段");
+                triggerBuzzer("buzz2");
             } else if (previousStageIndex == 0 && currentStageIndex == 1) {
                 // 准备阶段 -> 比赛阶段
                 log.info("🔴 -> 🟢 准备阶段 -> 比赛阶段，触发buzz2鸣笛");
@@ -1497,6 +1506,7 @@ public class TimerEngine {
                 // 所有阶段结束，计时完成
                 log.info("⏹️ 所有阶段结束，计时完成");
                 // 可以触发结束声音，暂不处理
+//                triggerBuzzer("buzz2");
             } else {
                 log.info("🔄 其他阶段切换: {} -> {}", previousStageIndex, currentStageIndex);
             }
@@ -1658,7 +1668,8 @@ public class TimerEngine {
             try {
                 timerScheduler.scheduleAtFixedRate(() -> {
                     try {
-                        updateTimerState();
+//                        updateTimerState();
+                        updateTimerStateAndSeedMsg();
                     } catch (Exception e) {
                         log.error("定时任务执行异常", e);
                     }

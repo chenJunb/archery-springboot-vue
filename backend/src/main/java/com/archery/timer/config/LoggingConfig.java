@@ -1,12 +1,10 @@
 package com.archery.timer.config;
 
-import com.archery.timer.service.LogFileManager;
 import javax.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,7 +21,7 @@ public class LoggingConfig {
     @Value("${custom.logging.directory:logs}")
     private String logDirectory;
 
-    @Value("${custom.logging.max-files:15}")
+    @Value("${custom.logging.max-files:7}")
     private int maxLogFiles;
 
     @PostConstruct
