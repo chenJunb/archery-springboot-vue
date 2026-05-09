@@ -7,8 +7,15 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
+  web:
+    resources:
+      static-locations:
+        - "file:${APP_WEB_RESOURCES:classpath:/META-INF/resources/,classpath:/resources/,classpath:/static/,classpath:/public/}"
 
 logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
   level:
     com.archery.timer: DEBUG
   file:
@@ -23,8 +30,8 @@ logging:
 # 自定义日志配置（通过 @Value 注入）
 custom:
   logging:
-    directory: logs
-    max-files: 7
+    directory: ${LOGGING_FILE_DIRECTORY:logs}
+    max-files: ${LOGGING_FILE_MAX_FILES:7}
 
 # WebSocket配置
 archery:

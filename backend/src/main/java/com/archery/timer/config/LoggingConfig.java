@@ -27,8 +27,21 @@ public class LoggingConfig {
     @PostConstruct
     public void init() {
         try {
-            // 创建日志目录
-            Path logDir = Paths.get(logDirectory);
+            // 从环境变量获取应用安装目录（由Electron传递）
+            String appInstallDir = System.getenv("APP_INSTALL_DIR");
+
+            // 确定日志目录路径
+            Path logDir;
+            if (appInstallDir != null && !appInstallDir.isEmpty()) {
+                // 使用安装目录作为基础
+                logDir = Paths.get(appInstallDir, logDirectory);
+                log.info("使用安装目录创建日志目录: {}", appInstallDir);
+            } else {
+                // 回退：在当前目录创建
+                logDir = Paths.get(logDirectory);
+                log.info("未找到APP_INSTALL_DIR环境变量，使用当前目录创建日志目录: {}", logDir.toAbsolutePath());
+            }
+
             if (!Files.exists(logDir)) {
                 Files.createDirectories(logDir);
                 log.info("创建日志目录: {}", logDir.toAbsolutePath());
@@ -75,6 +88,15 @@ public class LoggingConfig {
             }
         }
 
+        // 获取实际的日志目录路径
+        String appInstallDir = System.getenv("APP_INSTALL_DIR");
+        Path actualLogDir;
+        if (appInstallDir != null && !appInstallDir.isEmpty()) {
+            actualLogDir = Paths.get(appInstallDir, logDirectory);
+        } else {
+            actualLogDir = Paths.get(logDirectory);
+        }
+
         return String.format(
             "===========================================\n" +
             "Archery Timer System Startup\n" +
@@ -88,17 +110,19 @@ public class LoggingConfig {
             "    用户: %s\n" +
             "    工作目录: %s\n" +
             "环境变量:\n" +
+            "    APP_INSTALL_DIR: %s\n" +
             "    LOGGING_FILE_DIRECTORY: %s\n" +
             "    LOGGING_FILE_MAX_FILES: %d\n" +
             "===========================================\n",
             LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
-            Paths.get(logDirectory).toAbsolutePath(),
+            actualLogDir.toAbsolutePath(),
             maxLogFiles,
             System.getProperty("java.version"),
             System.getProperty("os.name"),
             System.getProperty("os.version"),
             System.getProperty("user.name"),
             System.getProperty("user.dir"),
+            appInstallDir != null ? appInstallDir : "未设置",
             System.getenv("LOGGING_FILE_DIRECTORY") != null ? System.getenv("LOGGING_FILE_DIRECTORY") : "未设置",
             maxFilesFromEnv
         );

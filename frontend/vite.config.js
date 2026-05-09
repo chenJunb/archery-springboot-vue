@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      'element-plus/es': 'element-plus/lib',
+      'element-plus/es/components': 'element-plus/lib/components'
     }
   },
   server: {
@@ -29,6 +31,37 @@ export default defineConfig({
       }
     },
     cors: true // 允许CORS
+  },
+  build: {
+    base: './',
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      plugins: [{
+        name: 'patch-element-plus',
+        resolveId(source, importer) {
+          // Patch all missing element-plus ES module imports
+          if (importer && importer.includes('node_modules/element-plus/')) {
+            // Fix missing window-node.mjs or global-node.mjs
+            if (source.includes('window-node.mjs') || source.includes('global-node.mjs')) {
+              return { id: '\0element-plus-global-node', external: false }
+            }
+            // Fix missing hooks
+            if (source.includes('use-window-config') || source.includes('use-prevent-window')) {
+              return { id: '\0element-plus-missing-hook', external: false }
+            }
+          }
+        },
+        load(id) {
+          if (id === '\0element-plus-global-node') {
+            return 'export const createGlobalNode = () => ({ remove: () => {} }); export const removeGlobalNode = () => {}'
+          }
+          if (id === '\0element-plus-missing-hook') {
+            return 'export const useWindowConfig = () => ({}); export const usePreventWindow = () => ({})'
+          }
+        }
+      }]
+    }
   },
   // 定义全局变量以支持Node.js模块
   define: {

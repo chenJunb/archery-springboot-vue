@@ -44,6 +44,19 @@
       color: #888;
     }
 
+    .header .console-url {
+      font-size: 14px;
+      color: #00ff00;
+      margin-top: 5px;
+      text-shadow: 0 0 5px rgba(0, 255, 0, 0.5);
+      font-family: 'Courier New', monospace;
+      padding: 5px 10px;
+      background: rgba(0, 255, 0, 0.1);
+      border: 1px solid rgba(0, 255, 0, 0.3);
+      border-radius: 4px;
+      display: inline-block;
+    }
+
     .log-container {
       flex: 1;
       overflow-y: auto;
@@ -175,6 +188,8 @@
     <div class="header">
       <h1>🎯 射箭比赛计时系统 - 启动日志</h1>
       <p>System Startup Log | 系统启动日志</p>
+<!--      <p>控制台页面: http://localhost:3000</p>-->
+      <p class="console-url">控制台页面: http://localhost:3000</p>
     </div>
 
     <div class="log-container" id="logContainer">
@@ -194,6 +209,7 @@
       <div class="button-group">
         <button id="clearBtn">清空日志</button>
         <button id="copyBtn">复制日志</button>
+        <button id="hideBtn">隐藏窗口</button>
       </div>
     </div>
   </div>
@@ -252,9 +268,21 @@
       });
     });
 
+    // 隐藏窗口按钮
+    const hideBtn = document.getElementById('hideBtn')
+    hideBtn.addEventListener('click', () => {
+      if (window.electronAPI?.minimizeWindow) {
+        window.electronAPI.minimizeWindow()
+      } else {
+        // 如果没有electronAPI，尝试关闭窗口
+        window.close()
+      }
+    })
+
     // 页面加载完成提示
     window.addEventListener('load', () => {
-      addLog('✅ [系统] 日志窗口已加载，等待启动信息...');
+      addLog('✅ [系统] 日志窗口已加载，等待启动信息...')
+      addLog('ℹ️ [提示] 按 Ctrl+L 可再次显示此窗口')
     });
   </script>
 </body>

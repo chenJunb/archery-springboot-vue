@@ -345,8 +345,8 @@ export function initGlobalWebSocket() {
   })
 
   // ✅ WebSocket URL 配置
-  // 开发环境：使用相对路径走 Vite 代理，vite.config.js 中配置了 /ws-archery-timer 到 http://localhost:8080
-  // 生产环境：直接使用相对路径
+  // 开发环境：使用相对路径走 Vite 代理
+  // 生产环境（Electron HTTP服务器）：通过本地HTTP服务器代理，使用相对路径
   const wsUrl = '/ws-archery-timer'
   logService.debug('WebSocket连接URL:', {
     wsUrl,
