@@ -86,7 +86,7 @@ export function useBuzzer() {
             if (!isMuted.value) {
                 playSound('beep2')
             }
-        }, 300)
+        }, 1000)
     }
 
     // 3声（进入黄灯）- 播放三次，间隔250ms
@@ -100,9 +100,9 @@ export function useBuzzer() {
                     if (!isMuted.value) {
                         playSound('beep3')
                     }
-                }, 250)
+                }, 1000)
             }
-        }, 250)
+        }, 1000)
     }
 
     // 倒计时声音

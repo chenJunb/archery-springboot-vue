@@ -1,8 +1,6 @@
 package com.archery.timer.service;
 
-import com.archery.timer.model.dto.EnhancedMatchTypeDTO;
-import com.archery.timer.model.dto.MatchTypeDTO;
-import com.archery.timer.model.dto.TimerStateDTO;
+import com.archery.timer.model.dto.*;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +18,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import org.springframework.util.CollectionUtils;
 
 @Slf4j
 public class TimerEngine {
@@ -240,6 +239,19 @@ public class TimerEngine {
         }
 
         log.info("选择比赛类型: {} (AB模式: {})", enhancedMatchType.getChineseName(), this.currentState.getAbMode());
+
+        //是否开启轮次记录
+        if(enhancedMatchType.getIsRound() && !CollectionUtils.isEmpty(enhancedMatchType.getLaunchRoundKeys())){
+            log.debug("开启轮次记录，初始化轮次信息");
+            this.currentState.setIsRound(true);
+            RoundRecordDto roundRecordDto = new RoundRecordDto().init(enhancedMatchType.getLaunchRoundKeys());
+            this.currentState.setRoundRecord(roundRecordDto);
+        } else {
+            //未开始轮次，参数置为null
+            this.currentState.setIsRound(false);
+            this.currentState.setRoundRecord(null);
+        }
+
         notifyStateChange();
     }
 
@@ -277,6 +289,14 @@ public class TimerEngine {
             screenATotalPausedDuration = 0;
             screenBTotalPausedDuration = 0;
             this.isFirstStart = true;
+
+            Integer compTime = currentState.getCompetitionTime();
+            Integer prepTime = currentState.getPreparationTime();
+            int totalTime = (prepTime != null ? prepTime : 0) + (compTime != null ? compTime : 0);
+            currentState.setTotalRemaining(totalTime);
+            currentState.setTotalElapsed(0);
+            //更新轮次记录
+            recordRoundUpdate("add");
             log.debug("✅ 首次启动 - 时间基准已初始化");
         } else if (isTimerPaused) {
             // === 从暂停恢复 ===
@@ -540,6 +560,9 @@ public class TimerEngine {
             screenBPreviousStageIndex = -1;
             screenBWasYellowLight = false;
         }
+
+        // ✅ 重置优先屏幕为默认值
+        currentState.setActiveScreen("A");
 //        stopTimerTask();
         log.info("重置计时");
         notifyStateChange();
@@ -608,6 +631,31 @@ public class TimerEngine {
     }
 
     /**
+     * 设置优先屏幕（AB交替模式下有效）
+     * @param screen 优先屏幕，必须为 "A" 或 "B"
+     */
+    public synchronized void setPreferredScreen(String screen) {
+        if (!"A".equals(screen) && !"B".equals(screen)) {
+            log.warn("⚠️ 无效的优先屏幕参数，忽略: {}", screen);
+            return;
+        }
+
+        // 仅在AB交替模式下生效
+        if (!"alternate".equals(currentState.getAbMode())) {
+            log.debug("当前非AB交替模式，优先屏幕设置将被忽略: {}", currentState.getAbMode());
+            return;
+        }
+
+        // 更新活跃屏幕
+        currentState.setActiveScreen(screen);
+        isAScreenActive = "A".equals(screen);
+        log.info("🔄 优先屏幕已更新: {} (当前模式: {})", screen, currentState.getAbMode());
+
+        // 通知状态变更
+        notifyStateChange();
+    }
+
+    /**
      * 初始化AB交替模式
      */
     private void initializeABAlternateMode() {
@@ -659,6 +707,11 @@ public class TimerEngine {
 
         if (currentEnhancedMatchType == null) {
             log.error("❌ 未选择比赛类型，无法切换屏幕");
+            return;
+        }
+
+        if(previousStageIndex == -1){
+            log.error("❌ 准备阶段无法切屏，无法切换屏幕");
             return;
         }
 
@@ -819,6 +872,10 @@ public class TimerEngine {
                 log.info("团队赛切换后记录A屏幕时间: timerStartedAt：{}秒 ,当前时间-A屏幕时间{} 倒推出假定开始时间",
                         timerStartedAt,screenATimerRemaining);
 
+                //切换A屏后B屏自动进入暂停阶段，红灯
+                currentState.setScreenBStageName("暂停");
+                currentState.setScreenBStageColor(currentMatchType.getStages().get(0).getColor());
+
             } else {
                 // 切换到B屏
                 screenBTimerPausedAt = 0;             // B屏继续运行
@@ -834,6 +891,10 @@ public class TimerEngine {
                 timerStartedAt = now - screenBTotalPausedDuration - (screenBTimerRemaining * 1000);
                 log.info("团队赛切换后记录B屏幕时间: timerStartedAt：{}秒 ,当前时间-B屏幕时间{} 倒推出假定开始时间",
                         timerStartedAt,screenBTimerRemaining);
+
+                //切换B屏后A屏自动进入暂停阶段，红灯
+                currentState.setScreenAStageName("暂停");
+                currentState.setScreenAStageColor(currentMatchType.getStages().get(0).getColor());
             }
 
         }
@@ -1116,6 +1177,15 @@ public class TimerEngine {
                         // A屏灯色由 calculateScreenStage("A") 更新
                         // B屏灯色由 calculateScreenStage("B") 更新
                         log.info("[计时器状态AB屏倒计时-0] B屏倒计时：{}" ,currentState.getScreenBRemaining());
+                        if(isFirstStart){
+                            // 时间应该是
+//                            screenBStartedAt = now;
+                            screenATimerRemaining = compTimeVal;            // 首次启动B屏处于暂停状况显示时间是绿灯初始时间
+                            screenATimerPausedAt = now;                     //默认算从当前时刻开始暂停
+                            screenAPauseStartTime = now;                    //screenBPauseStartTime 暂停开始时间
+                            log.debug("[首次启动] 更新A屏初始值 screenBStartedAt：{} , screenBTimerRemaining : {} , screenBTimerPausedAt : {}",screenBStartedAt,screenBTimerRemaining,screenBTimerPausedAt);
+                            calculateScreenStage("A", totalElapsedSecondsInt,"paused");
+                        }
                     }
                 }
                 if(isFirstStart){
@@ -1194,16 +1264,25 @@ public class TimerEngine {
         int globalPrepComplete = prepTimeVal;
         boolean isInCompetitionStage = totalElapsedSeconds >= globalPrepComplete;
 
+        // ✅ 非个人赛（团队赛），或准备阶段：使用标准的阶段计算逻辑
+        int screenElapsedSeconds = totalElapsedSeconds;
+
+        // 对于团队赛在绿灯阶段，需要根据屏幕是否暂停来计算时间
+        log.debug("screenAStartedAt : {} , screenBStartedAt : {} ",screenAStartedAt,screenBStartedAt);
+
         if (isIndividual) {
             // ✅ 个人赛的绿灯阶段：直接使用屏幕的screenXTimerRemaining
             if ("A".equals(screenName)) {
                 int aRemaining = (int) screenATimerRemaining;
-
-                if (previousStageIndex != 0){
+                MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
+                if("paused".equals(status)){
+                    //如果当前状态是暂停 默认红灯
+                    currentState.setScreenAStageName("暂停");
+                    currentState.setScreenAStageColor(firstStage.getColor());
+                } else if (previousStageIndex != 0){
                     //当前比赛阶段不是处于0准备阶段 当比赛剩余时间小于等于黄灯时间则变为黄灯
                     if(aRemaining == 0){
                         //当倒计时结束0秒时显示红灯
-                        MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
                         currentState.setScreenAStageName(firstStage.getName());
                         currentState.setScreenAStageColor(firstStage.getColor());
 //                        currentState.setScreenAStatus("finished");
@@ -1223,10 +1302,14 @@ public class TimerEngine {
             } else if ("B".equals(screenName)) {
                 int bRemaining = (int) screenBTimerRemaining;
 //                int screenAStageElapsed = compTimeVal - bRemaining;
-                if (previousStageIndex != 0){
+                MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
+                if("paused".equals(status)){
+                    //如果当前状态是暂停 默认红灯
+                    currentState.setScreenBStageName("暂停");
+                    currentState.setScreenBStageColor(firstStage.getColor());
+                } else if (previousStageIndex != 0){
                     if(bRemaining == 0){
                         //当倒计时结束0秒时显示红灯
-                        MatchTypeDTO.StageDTO firstStage = currentMatchType.getStages().get(0);
                         currentState.setScreenBStageName(firstStage.getName());
                         currentState.setScreenBStageColor(firstStage.getColor());
 //                        currentState.setScreenBStatus("finished");
@@ -1247,14 +1330,7 @@ public class TimerEngine {
                         currentState.getScreenBStageName());
             }
             return;
-        }
-
-        // ✅ 非个人赛（团队赛），或准备阶段：使用标准的阶段计算逻辑
-        int screenElapsedSeconds = totalElapsedSeconds;
-
-        // 对于团队赛在绿灯阶段，需要根据屏幕是否暂停来计算时间
-        log.debug("screenAStartedAt : {} , screenBStartedAt : {} ",screenAStartedAt,screenBStartedAt);
-        if (!isIndividual) { // 暂时先移除，因为同步模式下不需要 isActiveScreen
+        } else  { // 暂时先移除，因为同步模式下不需要 isActiveScreen
             // 团队赛中，活跃屏幕从其起始时间计算
             if ("A".equals(screenName) && screenAStartedAt > 0) {
                 long now = System.currentTimeMillis();
@@ -1336,7 +1412,11 @@ public class TimerEngine {
             stageColor = currentStage.getColor();
             stageName = currentStage.getName();
             log.debug("原有信息判断是否变为黄灯 stageColor：{} , currentStageIndex : {} , currentEnhancedMatchType : {} , yellowLightTime : {} , stageRemaining : {} " ,stageColor,currentStageIndex,currentEnhancedMatchType,yellowLightTime,stageRemaining);
-            if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
+            if("paused".equals(status)) {
+                //如果当前状态是暂停 默认红灯
+                stageName = "暂停";
+                stageColor = currentMatchType.getStages().get(0).getColor();
+            } else if (currentStageIndex == 1 && currentEnhancedMatchType != null) {
                 if(stageRemaining == 0){
                     // 当剩余时长为0时 应该是红灯
                     stageColor = currentMatchType.getStages().get(0).getColor();
@@ -1604,10 +1684,12 @@ public class TimerEngine {
             } else if("only_a".equals(currentState.getAbMode())) {
                 screenATimerRemaining = 0; // A屏剩余时间清零
                 calculateScreenStage("A", totalTime,"finished");
+                lastUpdateAt = 0;
                 log.info("计时结束 - 比赛类型: {}, 屏幕控制方式：{}, 已更新A屏状态", currentMatchType.getName(),currentState.getAbMode());
             } else if("only_b".equals(currentState.getAbMode())) {
                 screenBTimerRemaining = 0; // B屏剩余时间清零
                 calculateScreenStage("B", totalTime,"finished");
+                lastUpdateAt = 0;
                 log.info("计时结束 - 比赛类型: {}, 屏幕控制方式：{}, 已更新B屏状态", currentMatchType.getName(),currentState.getAbMode());
             } else {
                 // 同步模式
@@ -1620,6 +1702,9 @@ public class TimerEngine {
                 // 更新AB屏的独立阶段信息
                 calculateScreenStage("A", totalTime,"finished");
                 calculateScreenStage("B", totalTime,"finished");
+                //更新轮次记录
+                recordRoundUpdate("end");
+                lastUpdateAt = 0;
                 log.info("计时结束 - 比赛类型: {}, 屏幕控制方式：{}, 已更新AB屏状态", currentMatchType.getName(),currentState.getAbMode());
             }
 
@@ -2143,5 +2228,79 @@ public class TimerEngine {
                 Thread.currentThread().interrupt();
             }
         }
+    }
+
+
+    /**
+     * 比赛轮次记录更新
+     * 每次比赛开始：更新当前轮次比赛状态：进行中
+     * 倒计时结束：将历史最后一条进行中状态变更为已经结束 生成最新一条比赛轮次记录状态为未开始
+     * 因仅有个人排名赛存在比赛轮次，比赛轮次为同步模式，暂不考虑AB屏切换逻辑
+     * @param operation 操作类型 add/end 新增/结束
+     * @return
+     */
+    private void recordRoundUpdate(String operation){
+        log.debug("[比赛轮次记录更新]");
+        if(!currentState.getIsRound()){
+            //未开启比赛轮次，跳过
+            log.debug("[比赛轮次记录更新] 未开启比赛轮次，跳过");
+            return;
+        }
+        RoundRecordDto roundRecordDto = currentState.getRoundRecord();
+        List<RoundDetailDTO> details = roundRecordDto.getDetails();
+        RoundDetailDTO lastDetail =  details.get(details.size() - 1);
+        if("add".equals(operation)){
+            log.debug("[比赛轮次记录更新] 更新当前轮次比赛状态：进行中 原有状态：{}",lastDetail.getStatus());
+            // 更新当前轮次比赛状态：进行中
+            if("not_started".equals(lastDetail.getStatus())){
+                //只有最后一条状态是未开始才能修改未进行中
+                details.stream()
+                        .filter(config -> lastDetail.getNo() == config.getNo())
+                        .forEach(config -> {
+                            config.setStatus("in_progress");
+                        });
+            }
+        } else if("end".equals(operation)){
+            log.debug("[比赛轮次记录更新] 更新当前轮次比赛状态：已结束,原有状态:{}",lastDetail.getStatus());
+            // 更新当前轮次比赛状态：已结束
+            if("in_progress".equals(lastDetail.getStatus())){
+                //只有最后一条状态是进行中才能修改已结束
+                details.stream()
+                        .filter(config -> lastDetail.getNo() == config.getNo())
+                        .forEach(config -> {
+                            config.setStatus("ended");
+                        });
+                //判断当前轮次key是否都结束了
+                List<String> launchRoundKeys = roundRecordDto.getLaunchRoundKeys();
+                String lastlaunchRoundKey = launchRoundKeys.get(launchRoundKeys.size()-1);
+
+                if(lastlaunchRoundKey.equals(roundRecordDto.getLaunchRoundCurrentKey())){
+                    //当前轮次key是轮次key集合的最后一条 将开启新轮次
+                    roundRecordDto.setRound(roundRecordDto.getRound()+1);
+                    roundRecordDto.setLaunchRoundCurrentKey(launchRoundKeys.get(0));
+                    //在新增一条未开始状态记录
+                    RoundDetailDTO newDetail  = new RoundDetailDTO();
+                    newDetail.setNo(lastDetail.getNo()+1);
+                    newDetail.setNoByRound(0);
+                    newDetail.setStatus("not_started");
+                    newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
+
+                    roundRecordDto.getDetails().add(newDetail);
+                } else {
+                    //当前轮次key不是轮次key集合的最后一条 继续当前轮次
+                    roundRecordDto.setLaunchRoundCurrentKey(launchRoundKeys.get(lastDetail.getNoByRound()+1));
+                    //在新增一条未开始状态记录
+                    RoundDetailDTO newDetail  = new RoundDetailDTO();
+                    newDetail.setNo(lastDetail.getNo()+1);
+                    newDetail.setNoByRound(lastDetail.getNoByRound()+1);
+                    newDetail.setStatus("not_started");
+                    newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
+
+                    roundRecordDto.getDetails().add(newDetail);
+                }
+            }
+        }
+        currentState.setRoundRecord(roundRecordDto);
+
     }
 }

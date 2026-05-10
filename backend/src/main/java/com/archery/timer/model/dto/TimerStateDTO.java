@@ -77,6 +77,13 @@ public class TimerStateDTO {
     private Boolean soundEnabled;
     private Integer volume;
 
+
+    private Boolean isRound; //是否开启比赛轮次
+    /**
+     * 比赛轮次
+     */
+    private RoundRecordDto roundRecord;
+
     public TimerStateDTO() {
         this.soundEnabled = true;
         this.volume = 80;
@@ -101,6 +108,7 @@ public class TimerStateDTO {
         state.setConnectedClients(0);
         state.setLastUpdateTime(LocalDateTime.now());
         state.setTimestamp(System.currentTimeMillis());
+        state.setIsRound(false);
         return state;
     }
 }

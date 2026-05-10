@@ -47,6 +47,9 @@ public class EnhancedMatchTypeDTO {
     // 比赛规则说明
     private Map<String, Object> rules; // 比赛规则描述
 
+    private Boolean isRound; //是否开启比赛轮次
+    private List<String> launchRoundKeys; //比赛轮次集合
+
     @Data
     public static class StageDTO {
         private String name;

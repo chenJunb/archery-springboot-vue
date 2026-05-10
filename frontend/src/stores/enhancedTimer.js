@@ -256,6 +256,16 @@ function initMessageListeners() {
         }
         break
 
+      // 注释掉心跳响应处理，因为现在服务器时间通过globalConnectionState单独管理
+      // case 'heartbeat_response':
+      //   // 心跳响应包含服务器时间
+      //   logService.debug('💓 收到心跳响应，更新服务器时间', { timestamp: data.timestamp })
+      //   if (data.timestamp) {
+      //     timerState.timestamp = data.timestamp
+      //     logService.debug('✅ 服务器时间已更新', { serverTime: new Date(data.timestamp).toISOString() })
+      //   }
+      //   break
+
       case 'matchTypes':
         if (data.success && data.data) {
           enhancedMatchTypes.value = data.data
@@ -612,6 +622,16 @@ export function useEnhancedTimerStore() {
     }, 100)
   }
 
+  // 设置优先屏幕（AB交替模式下有效）
+  const setPreferredScreen = (screen) => {
+    if (screen !== 'A' && screen !== 'B') {
+      logService.error('无效的优先屏幕值', { screen })
+      return
+    }
+    logService.info('🔧 设置优先屏幕:', screen)
+    sendGlobalWebSocketMessage('timer/set-preferred-screen', { screen })
+  }
+
   // 切换AB屏
   const toggleABScreen = () => {
     sendGlobalWebSocketMessage('timer/toggle-ab-screen', {})
@@ -857,6 +877,7 @@ export function useEnhancedTimerStore() {
     pauseTimer,
     resetTimer,
     setABMode,
+    setPreferredScreen,
     toggleABScreen,
     setScreenEnabled,
     setPrompt,

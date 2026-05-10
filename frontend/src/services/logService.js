@@ -66,6 +66,8 @@ class LogService {
     }
 
     debug(message, data) {
+        // ✅ 强制在 console 中显示 debug 日志，便于排查
+        console.log(`[DEBUG] ${message}`, data || '')
         this.log('DEBUG', message, data)
     }
 

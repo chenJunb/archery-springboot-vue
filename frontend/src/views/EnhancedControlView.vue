@@ -2,7 +2,205 @@
   <div class="enhanced-control-view">
     <!-- 主控控制台布局 -->
     <div class="control-container">
-      <!-- 左侧控制面板 -->
+      <!-- 左侧显示区域（原来是右侧） -->
+      <div class="control-right-panel">
+        <!-- 屏幕预览标题 -->
+        <div class="screen-preview-header">
+          <div class="screen-preview-title">
+            <el-icon><Monitor /></el-icon>
+            <span>屏幕预览</span>
+          </div>
+          <div class="screen-count-info">
+            <span class="current-screens">当前显示：{{ activeScreensCount }}个屏幕</span>
+            <el-tag size="small" :type="canAddMoreScreens ? 'success' : 'warning'">
+              最多支持{{ maxSupportedScreens }}屏
+            </el-tag>
+          </div>
+        </div>
+
+        <!-- 屏幕预览容器 - 自适应布局 -->
+        <div class="screen-preview-container">
+          <!-- A屏预览 -->
+          <div class="screen-preview" :class="{ active: timerState.activeScreen === 'A' && screenMode === 'alternate' }">
+            <div class="screen-header">
+            <span class="screen-title">A屏预览</span>
+            <el-button
+              size="small"
+              type="primary"
+              :icon="CopyDocument"
+              @click="copyScreenUrl('A')"
+            >
+              复制地址
+            </el-button>
+          </div>
+          <div class="screen-content">
+            <!-- 提示文案 -->
+            <div class="screen-prompt">
+              {{ timerState.aprompt || '选手A准备' }}
+            </div>
+
+            <!-- 屏幕状态 -->
+            <div class="screen-status">
+              <!-- 倒计时时间 -->
+              <div class="screen-timer">
+                <!-- AB交替模式下显示当前屏幕的剩余时间 -->
+<!--                  <div class="timer-label">剩余时间</div>-->
+                  <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
+                  <!-- <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>  -->
+                  <div class="timer-value">{{ timerState.screenARemaining }}</div>
+              </div>
+
+              <!-- 圆形状态灯 -->
+              <div class="status-light" :style="{ backgroundColor: screenALightColor }">
+                <div class="light-glow"></div>
+              </div>
+
+              <!-- 屏幕状态标签 -->
+              <div class="screen-status-tag" :class="{
+                running: timerState.screenAStatus === 'running',
+                paused: timerState.screenAStatus !== 'running'
+              }">
+                {{ timerState.screenAStatus === 'running' ? '运行中' : '已暂停' }}
+              </div>
+            </div>
+
+            <!-- 当前阶段信息 -->
+<!--            <div class="stage-info">-->
+<!--              <div class="stage-name">{{ timerState.screenAStageName || '准备阶段' }}</div>-->
+<!--              &lt;!&ndash;  <div class="stage-timer">{{ timerState.screenARemaining }}</div>  &ndash;&gt;-->
+<!--              &lt;!&ndash;  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  &ndash;&gt;-->
+<!--              <div class="stage-timer">{{ timerState.screenARemaining }}</div>-->
+<!--            </div>-->
+          </div>
+        </div>
+
+        <!-- B屏预览 -->
+        <div class="screen-preview" :class="{ active: timerState.activeScreen === 'B' && screenMode === 'alternate' }">
+          <div class="screen-header">
+            <span class="screen-title">B屏预览</span>
+            <el-button
+              size="small"
+              type="success"
+              :icon="CopyDocument"
+              @click="copyScreenUrl('B')"
+            >
+              复制地址
+            </el-button>
+          </div>
+          <div class="screen-content">
+            <!-- 提示文案 -->
+            <div class="screen-prompt">
+              {{ timerState.bprompt || '选手B准备' }}
+            </div>
+
+            <!-- 屏幕状态 -->
+            <div class="screen-status">
+              <!-- 倒计时时间 -->
+              <div class="screen-timer">
+<!--                 AB交替模式下显示当前屏幕的剩余时间-->
+<!--                <div class="timer-label">剩余时间</div>-->
+                <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
+                <!--  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>  -->
+                <div class="timer-value">{{ timerState.screenBRemaining }}</div>
+              </div>
+
+              <!-- 圆形状态灯 -->
+              <div class="status-light" :style="{ backgroundColor: screenBLightColor }">
+                <div class="light-glow"></div>
+              </div>
+
+              <!-- 屏幕状态标签 -->
+              <div class="screen-status-tag" :class="{
+                running: timerState.screenBStatus === 'running',
+                paused: timerState.screenBStatus !== 'running'
+              }">
+                {{ timerState.screenBStatus === 'running' ? '运行中' : '已暂停' }}
+              </div>
+            </div>
+
+            <!-- 当前阶段信息 -->
+<!--            <div class="stage-info">-->
+<!--              <div class="stage-name">{{ timerState.screenBStageName || '准备阶段' }}</div>-->
+<!--              &lt;!&ndash;  <div class="stage-timer">{{ timerState.screenBRemaining }}</div>  &ndash;&gt;-->
+<!--              &lt;!&ndash;  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  &ndash;&gt;-->
+<!--              <div class="stage-timer">{{ timerState.screenBRemaining }}</div>-->
+<!--            </div>-->
+          </div>
+        </div>
+
+        </div> <!-- 关闭 screen-preview-container -->
+
+        <!-- 额外屏幕容器占位符 - 预留增加屏幕展示位置 -->
+        <div class="extra-screens-container">
+          <div class="screen-preview placeholder-screen" v-if="showPlaceholderScreen">
+            <div class="screen-header">
+              <span class="screen-title">C屏预览 (占位符)</span>
+              <el-button
+                size="small"
+                type="info"
+                :icon="Switch"
+                disabled
+              >
+                等待启用
+              </el-button>
+            </div>
+            <div class="screen-content placeholder-content">
+              <div class="screen-prompt">
+                未来可扩展更多屏幕
+              </div>
+              <div class="screen-status">
+                <div class="status-light" :style="{ backgroundColor: '#666666' }">
+                  <div class="light-glow"></div>
+                </div>
+                <div class="screen-timer">
+                  <div class="timer-label">等待配置</div>
+                  <div class="timer-value">--</div>
+                </div>
+                <div class="screen-status-tag info">
+                  待启用
+                </div>
+              </div>
+              <div class="stage-info">
+                <div class="stage-name">未配置阶段</div>
+                <div class="stage-timer">--</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 系统状态信息 -->
+        <div class="system-status">
+          <div class="status-item">
+            <el-icon><Connection /></el-icon>
+            <span>连接状态:</span>
+            <span :class="connectionStatusClass">{{ connectionStatusText }}</span>
+          </div>
+          <div class="status-item">
+            <el-icon><User /></el-icon>
+            <span>当前控制端:</span>
+            <span class="control-client">{{ isControlClient ? '当前用户' : '其他用户' }}</span>
+          </div>
+          <div class="status-item">
+            <el-icon><Clock /></el-icon>
+            <span>服务器时间:</span>
+            <span class="server-time">{{ formatServerTime(connectionState.serverTimestamp) }}</span>
+          </div>
+          <div class="status-item">
+            <el-icon><SwitchFilled /></el-icon>
+            <span>WebSocket:</span>
+            <span :class="timerStore.connectionState.isConnected ? 'status-connected' : 'status-disconnected'">
+              {{ timerStore.connectionState.isConnected ? '已连接' : '未连接' }}
+            </span>
+          </div>
+          <div class="status-item" v-if="timerStore.connectionState.clientId">
+            <el-icon><Key /></el-icon>
+            <span>客户端ID:</span>
+            <span class="client-id">{{ timerStore.connectionState.clientId }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧控制面板（原来是左侧） -->
       <div class="control-left-panel">
         <!-- 比赛类型选择器 -->
         <div class="control-section">
@@ -100,20 +298,55 @@
         <!-- 屏幕控制模式 -->
         <div class="control-section"  style="min-height: 150px;">
           <div class="section-header">
-            <el-icon><Monitor /></el-icon>
-            <span>屏幕控制模式</span>
+            <div class="section-header-left">
+              <el-icon><Monitor /></el-icon>
+              <span>屏幕控制模式</span>
+            </div>
+            <div class="section-header-right">
+              <el-switch
+                v-model="screenModeEnabled"
+                inline-prompt
+                active-text="启用"
+                inactive-text="禁用"
+                :active-value="true"
+                :inactive-value="false"
+                @change="handleScreenModeToggle"
+              />
+            </div>
           </div>
           <div class="section-content">
-            <el-radio-group v-model="screenMode" :disabled="!canModifyConfig" @change="handleScreenModeChange" class="screen-mode-group">
-              <div class="screen-mode-row">
-                <el-radio value="sync" border>同步模式</el-radio>
-                <el-radio value="alternate" border>AB交替模式</el-radio>
-              </div>
+            <el-radio-group v-model="screenMode" :disabled="!canModifyConfig || !screenModeEnabled" @change="handleScreenModeChange" class="screen-mode-group">
               <div class="screen-mode-row">
                 <el-radio value="only_a" border>仅A屏</el-radio>
                 <el-radio value="only_b" border>仅B屏</el-radio>
               </div>
+              <div class="screen-mode-row">
+                <el-radio value="sync" border>同步模式</el-radio>
+                <el-radio value="alternate" border>AB交替模式</el-radio>
+              </div>
             </el-radio-group>
+          </div>
+        </div>
+
+        <!-- 优先屏幕设置（仅AB交替模式下显示） -->
+        <div class="control-section" v-if="screenMode === 'alternate'" :disabled="screenModeEnabled">
+          <div class="section-header">
+            <el-icon><Star /></el-icon>
+            <span>优先屏幕设置</span>
+          </div>
+          <div class="section-content">
+            <el-radio-group
+              v-model="preferredScreen"
+              :disabled="!screenModeEnabled || !canModifyConfig"
+              @change="handlePreferredScreenChange"
+              class="preferred-screen-group"
+            >
+              <el-radio value="A" border>A屏优先</el-radio>
+              <el-radio value="B" border>B屏优先</el-radio>
+            </el-radio-group>
+            <div class="match-type-desc" v-if="screenMode === 'alternate'">
+              设置AB交替模式下启动时默认显示的屏幕
+            </div>
           </div>
         </div>
 
@@ -278,204 +511,6 @@
           </div>
         </div>
       </div>
-
-      <!-- 右侧显示区域 -->
-      <div class="control-right-panel">
-        <!-- 屏幕预览标题 -->
-        <div class="screen-preview-header">
-          <div class="screen-preview-title">
-            <el-icon><Monitor /></el-icon>
-            <span>屏幕预览</span>
-          </div>
-          <div class="screen-count-info">
-            <span class="current-screens">当前显示：{{ activeScreensCount }}个屏幕</span>
-            <el-tag size="small" :type="canAddMoreScreens ? 'success' : 'warning'">
-              最多支持{{ maxSupportedScreens }}屏
-            </el-tag>
-          </div>
-        </div>
-
-        <!-- 屏幕预览容器 - 自适应布局 -->
-        <div class="screen-preview-container">
-          <!-- A屏预览 -->
-          <div class="screen-preview" :class="{ active: timerState.activeScreen === 'A' && screenMode === 'alternate' }">
-            <div class="screen-header">
-            <span class="screen-title">A屏预览</span>
-            <el-button
-              size="small"
-              type="primary"
-              :icon="CopyDocument"
-              @click="copyScreenUrl('A')"
-            >
-              复制地址
-            </el-button>
-          </div>
-          <div class="screen-content">
-            <!-- 提示文案 -->
-            <div class="screen-prompt">
-              {{ timerState.aprompt || '选手A准备' }}
-            </div>
-
-            <!-- 屏幕状态 -->
-            <div class="screen-status">
-              <!-- 圆形状态灯 -->
-              <div class="status-light" :style="{ backgroundColor: screenALightColor }">
-                <div class="light-glow"></div>
-              </div>
-
-              <!-- 倒计时时间 -->
-              <div class="screen-timer">
-                <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                  <div class="timer-label">剩余时间</div>
-                  <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
-                  <!-- <div class="timer-value">{{ Math.round(displayScreenARemaining) }}</div>  -->
-                  <div class="timer-value">{{ timerState.screenARemaining }}</div>
-              </div>
-
-              <!-- 屏幕状态标签 -->
-              <div class="screen-status-tag" :class="{
-                running: timerState.screenAStatus === 'running',
-                paused: timerState.screenAStatus !== 'running'
-              }">
-                {{ timerState.screenAStatus === 'running' ? '运行中' : '已暂停' }}
-              </div>
-            </div>
-
-            <!-- 当前阶段信息 -->
-            <div class="stage-info">
-              <div class="stage-name">{{ timerState.screenAStageName || '准备阶段' }}</div>
-              <!--  <div class="stage-timer">{{ timerState.screenARemaining }}</div>  -->
-              <!--  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  -->
-              <div class="stage-timer">{{ timerState.screenARemaining }}</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- B屏预览 -->
-        <div class="screen-preview" :class="{ active: timerState.activeScreen === 'B' && screenMode === 'alternate' }">
-          <div class="screen-header">
-            <span class="screen-title">B屏预览</span>
-            <el-button
-              size="small"
-              type="success"
-              :icon="CopyDocument"
-              @click="copyScreenUrl('B')"
-            >
-              复制地址
-            </el-button>
-          </div>
-          <div class="screen-content">
-            <!-- 提示文案 -->
-            <div class="screen-prompt">
-              {{ timerState.bprompt || '选手B准备' }}
-            </div>
-
-            <!-- 屏幕状态 -->
-            <div class="screen-status">
-              <!-- 圆形状态灯 -->
-              <div class="status-light" :style="{ backgroundColor: screenBLightColor }">
-                <div class="light-glow"></div>
-              </div>
-
-              <!-- 倒计时时间 -->
-              <div class="screen-timer">
-                <!-- AB交替模式下显示当前屏幕的剩余时间 -->
-                <div class="timer-label">剩余时间</div>
-                <!-- ✅ 修复：使用实时倒计时computed而不是直接的状态值 -->
-                <!--  <div class="timer-value">{{ Math.round(displayScreenBRemaining) }}</div>  -->
-                <div class="timer-value">{{ timerState.screenBRemaining }}</div>
-              </div>
-
-              <!-- 屏幕状态标签 -->
-              <div class="screen-status-tag" :class="{
-                running: timerState.screenBStatus === 'running',
-                paused: timerState.screenBStatus !== 'running'
-              }">
-                {{ timerState.screenBStatus === 'running' ? '运行中' : '已暂停' }}
-              </div>
-            </div>
-
-            <!-- 当前阶段信息 -->
-            <div class="stage-info">
-              <div class="stage-name">{{ timerState.screenBStageName || '准备阶段' }}</div>
-              <!--  <div class="stage-timer">{{ timerState.screenBRemaining }}</div>  -->
-              <!--  <div class="stage-timer">{{ Math.ceil(displayRemaining) }}</div>  -->
-              <div class="stage-timer">{{ timerState.screenBRemaining }}</div>
-            </div>
-          </div>
-        </div>
-
-        </div> <!-- 关闭 screen-preview-container -->
-
-        <!-- 额外屏幕容器占位符 - 预留增加屏幕展示位置 -->
-        <div class="extra-screens-container">
-          <div class="screen-preview placeholder-screen" v-if="showPlaceholderScreen">
-            <div class="screen-header">
-              <span class="screen-title">C屏预览 (占位符)</span>
-              <el-button
-                size="small"
-                type="info"
-                :icon="Switch"
-                disabled
-              >
-                等待启用
-              </el-button>
-            </div>
-            <div class="screen-content placeholder-content">
-              <div class="screen-prompt">
-                未来可扩展更多屏幕
-              </div>
-              <div class="screen-status">
-                <div class="status-light" :style="{ backgroundColor: '#666666' }">
-                  <div class="light-glow"></div>
-                </div>
-                <div class="screen-timer">
-                  <div class="timer-label">等待配置</div>
-                  <div class="timer-value">--</div>
-                </div>
-                <div class="screen-status-tag info">
-                  待启用
-                </div>
-              </div>
-              <div class="stage-info">
-                <div class="stage-name">未配置阶段</div>
-                <div class="stage-timer">--</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 系统状态信息 -->
-        <div class="system-status">
-          <div class="status-item">
-            <el-icon><Connection /></el-icon>
-            <span>连接状态:</span>
-            <span :class="connectionStatusClass">{{ connectionStatusText }}</span>
-          </div>
-          <div class="status-item">
-            <el-icon><User /></el-icon>
-            <span>当前控制端:</span>
-            <span class="control-client">{{ isControlClient ? '当前用户' : '其他用户' }}</span>
-          </div>
-          <div class="status-item">
-            <el-icon><Clock /></el-icon>
-            <span>服务器时间:</span>
-            <span class="server-time">{{ formatServerTime(timerState.timestamp) }}</span>
-          </div>
-          <div class="status-item">
-            <el-icon><SwitchFilled /></el-icon>
-            <span>WebSocket:</span>
-            <span :class="timerStore.connectionState.isConnected ? 'status-connected' : 'status-disconnected'">
-              {{ timerStore.connectionState.isConnected ? '已连接' : '未连接' }}
-            </span>
-          </div>
-          <div class="status-item" v-if="timerStore.connectionState.clientId">
-            <el-icon><Key /></el-icon>
-            <span>客户端ID:</span>
-            <span class="client-id">{{ timerStore.connectionState.clientId }}</span>
-          </div>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -490,7 +525,7 @@ import { subscribeToTimerState } from '../services/globalWebSocketService'
 import {
   Trophy, Clock, Monitor, Edit, Setting, VideoPlay, VideoPause,
   RefreshRight, Switch, Bell, Headset, CopyDocument, InfoFilled,
-  Connection, User, CircleCheckFilled, SwitchFilled, Key
+  Connection, User, CircleCheckFilled, SwitchFilled, Key, Star
 } from '@element-plus/icons-vue'
 
 const timerStore = useEnhancedTimerStore()
@@ -531,9 +566,11 @@ const yellowLightTime = ref(30)
 
 // 屏幕控制
 const screenMode = ref('alternate')
+const screenModeEnabled = ref(false) // 屏幕控制模式启用开关，默认禁用
 const aPrompt = ref('A屏提示')
 const bPrompt = ref('B屏提示')
 const showPlaceholderScreen = ref(false) // 占位符屏幕显示控制 - 暂时隐藏
+const preferredScreen = ref('A') // 优先屏幕，默认A屏优先
 
 // 声音控制
 const volume = ref(80)
@@ -728,6 +765,37 @@ const handleMatchTypeChange = (matchTypeId) => {
       logService.info('比赛类型已变更，发送后端重置消息', { matchTypeId })
       timerStore.sendGlobalWebSocketMessage('timer/reset', {})
     }
+  }
+}
+
+const handleScreenModeToggle = (enabled) => {
+  logService.event('SCREEN_MODE_CONTROL_TOGGLED', { enabled })
+  // 开关切换时无需额外处理，仅控制单选按钮的disabled状态
+}
+
+// 监听timerState.activeScreen变化，同步到preferredScreen
+watch(() => timerState.activeScreen, (newVal) => {
+  if (newVal === 'A' || newVal === 'B') {
+    preferredScreen.value = newVal
+    logService.debug('优先屏幕状态已同步', { from: 'timerState.activeScreen', to: newVal })
+  }
+}, { immediate: true })
+
+const handlePreferredScreenChange = (screen) => {
+  if (timerStore.connectionState.isConnected) {
+    try {
+      timerStore.setPreferredScreen(screen)
+      logService.info('优先屏幕设置变更', { screen })
+    } catch (error) {
+      logService.error('设置优先屏幕失败', { error: error.message })
+      ElMessage.error('设置优先屏幕失败，请重试')
+      // 恢复为之前的值
+      preferredScreen.value = timerState.activeScreen || 'A'
+    }
+  } else {
+    ElMessage.warning('未连接到服务器，无法更改优先屏幕')
+    // 恢复为之前的值
+    preferredScreen.value = timerState.activeScreen || 'A'
   }
 }
 
@@ -1042,6 +1110,15 @@ watch(() => timerStore.connectionState.isConnected, (isConnected) => {
   }
 }, { immediate: false })
 
+// 监视服务器时间戳变化，用于调试
+watch(() => connectionState.serverTimestamp, (newTimestamp, oldTimestamp) => {
+  logService.debug('🕒 服务器时间戳已更新', {
+    old: oldTimestamp ? new Date(oldTimestamp).toISOString() : 'null',
+    new: newTimestamp ? new Date(newTimestamp).toISOString() : 'null',
+    diff: newTimestamp && oldTimestamp ? (newTimestamp - oldTimestamp) + 'ms' : 'N/A'
+  })
+}, { immediate: true })
+
 
 // 生命周期
 onMounted(() => {
@@ -1104,8 +1181,8 @@ const subscribeToTopics = () => {
   overflow: visible;
 }
 
-/* 左侧控制面板 */
-/* 核心：给左侧面板设置高度 + 滚动规则 */
+/* 右侧控制面板（交换后） */
+/* 核心：给右侧控制面板设置高度 + 滚动规则 */
 .control-left-panel {
   /* 1. 设置固定高度/最大高度（根据布局场景选其一） */
   /* 方式1：固定高度（适配固定布局） */
@@ -1140,7 +1217,7 @@ const subscribeToTopics = () => {
   border-radius: 3px;
 }
 
-/* 右侧显示区域 */
+/* 左侧显示区域（交换后） */
 .control-right-panel {
   flex: 1;
   display: flex;
@@ -1174,6 +1251,18 @@ const subscribeToTopics = () => {
 .section-header .el-icon {
   font-size: 16px;
   color: #409eff;
+}
+
+.section-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.section-header-right {
+  display: flex;
+  align-items: center;
 }
 
 .section-content {
@@ -1468,59 +1557,64 @@ const subscribeToTopics = () => {
 }
 
 .screen-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
   position: relative;
+  display: flex;
+  align-items: center; /* 垂直居中 */
+  flex: 1; /* 占据剩余空间 */
+  margin-bottom: 16px;
   flex-shrink: 0;
+  min-height: 200px; /* 确保最小高度以容纳大数字 */
 }
 
 .status-light {
-  width: 80px;  /* 从90px缩小到80px */
-  height: 80px; /* 从90px缩小到80px */
+  width: 100px;  /* 略微缩小，避免抢占数字视觉重心 */
+  height: 100px; /* 略微缩小，避免抢占数字视觉重心 */
   border-radius: 50%;
-  position: relative;
+  position: absolute;
+  right: 10%; /* 距离预览屏幕右边框20%距离 */
+  top: 46%;
+  transform: translateY(-50%);
   box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
   transition: all 0.3s ease;
-  flex-shrink: 0;
+  z-index: 2;
 }
 
 .light-glow {
   position: absolute;
   top: 10px;
   left: 10px;
-  width: 60px;    /* 从70px缩小到60px */
-  height: 60px;   /* 从70px缩小到60px */
+  width: 50px;    /* 按比例缩小 */
+  height: 50px;   /* 按比例缩小 */
   border-radius: 50%;
-  background: radial-gradient(circle at 18px 18px, rgba(255, 255, 255, 0.8), transparent);
+  background: radial-gradient(circle at 15px 15px, rgba(255, 255, 255, 0.8), transparent);
   filter: blur(8px);
 }
 
 .screen-timer {
   text-align: center;
-  flex-shrink: 0;
+  z-index: 1;
+  margin: 0 auto; /* 在flex容器中水平居中 */
 }
 
 .timer-label {
-  font-size: 12px;
+  font-size: 16px;
   color: #999;
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
 .timer-value {
-  font-size: 32px;  /* 从36px缩小到32px */
+  font-size: 200px;  /* 放大为原来3倍 */
   font-weight: bold;
   font-family: 'Courier New', monospace;
   color: #fff;
   letter-spacing: 1px;
+  line-height: 1;
 }
 
 .screen-status-tag {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 8px;
+  left: 8px;
   padding: 4px 12px;
   border-radius: 4px;
   font-size: 12px;
@@ -1680,12 +1774,12 @@ const subscribeToTopics = () => {
     flex: none;
     width: 100%;
     max-width: 100%;
-    max-height: 40vh; /* 限制左侧面板的最大高度 */
+    max-height: 40vh; /* 限制右侧控制面板的最大高度 */
   }
 
   .control-right-panel {
     flex: 1;
-    max-height: 60vh; /* 右侧预览区约60% */
+    max-height: 60vh; /* 左侧预览区约60% */
     overflow-y: auto;
   }
 
@@ -1699,6 +1793,28 @@ const subscribeToTopics = () => {
   .screen-preview {
     min-height: 280px;
     max-height: 360px;
+  }
+
+  .timer-value {
+    font-size: 72px;
+  }
+
+  .screen-status {
+    min-height: 120px; /* 中等屏幕最小高度 */
+  }
+
+  .status-light {
+    width: 60px;
+    height: 60px;
+    right: 15%; /* 中等屏幕下调整距离 */
+  }
+
+  .light-glow {
+    width: 40px;
+    height: 40px;
+    top: 10px;
+    left: 10px;
+    background: radial-gradient(circle at 12px 12px, rgba(255, 255, 255, 0.8), transparent);
   }
 }
 
@@ -1729,7 +1845,37 @@ const subscribeToTopics = () => {
   }
 
   .timer-value {
-    font-size: 36px;
+    font-size: 60px;
+    line-height: 1;
+  }
+
+  .screen-status {
+    min-height: 100px; /* 移动端最小高度 */
+  }
+
+  .status-light {
+    width: 50px;
+    height: 50px;
+    right: 10%; /* 移动端调整距离 */
+  }
+
+  .light-glow {
+    width: 30px;
+    height: 30px;
+    top: 10px;
+    left: 10px;
+    background: radial-gradient(circle at 8px 8px, rgba(255, 255, 255, 0.8), transparent);
+  }
+
+  .timer-label {
+    font-size: 14px;
+  }
+
+  .screen-status-tag {
+    top: 4px;
+    left: 4px;
+    font-size: 10px;
+    padding: 2px 8px;
   }
 
   /* 屏幕预览容器在平板/移动端的响应式 */
@@ -1759,6 +1905,21 @@ const subscribeToTopics = () => {
     min-height: 120px;
     /* 允许容器自适应内容 */
     height: auto;
+  }
+
+  /* 优先屏幕设置样式 */
+  .preferred-screen-group {
+    display: flex;
+    gap: 16px;
+    margin-top: 8px;
+  }
+
+  .helper-text {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #909399;
+      line-height: 1.4;
+      height: 18px;
   }
 }
 </style>

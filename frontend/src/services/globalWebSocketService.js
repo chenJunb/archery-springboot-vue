@@ -17,8 +17,13 @@ export const globalConnectionState = reactive({
   isRegistered: false,
   clientId: null,
   clientType: 'control',
-  registerTime: null
+  registerTime: null,
+  serverTimestamp: null // 新增：服务器时间戳
 })
+
+// 待处理的心跳请求
+const pendingHeartbeatRequests = new Map() // requestId -> { resolve, reject, timeoutId }
+const heartbeatTimestamps = new Map() // requestId -> { sendTime, clientId }
 
 // 消息回调函数集合
 const messageCallbacks = new Set()
@@ -187,7 +192,7 @@ function subscribeToAllTopics() {
     return
   }
 
-  logService.info('开始订阅初始主题（计时器状态主题延迟订阅）')
+  logService.info('🚀 开始订阅初始主题（计时器状态主题延迟订阅）')
 
   // 重置订阅状态
   userQueueSubscribed = false
@@ -195,19 +200,37 @@ function subscribeToAllTopics() {
 
   // ✅ 关键修复：订阅个人用户队列（必须先建立）
   const userQueuePath = '/user/queue/messages'
-  logService.info('📡 订阅个人队列:', { path: userQueuePath })
+  logService.info('📡 准备订阅个人队列:', { path: userQueuePath })
 
   try {
+    logService.info('📡 正在调用 globalStompClient.subscribe()...')
+
     userQueueSubscription = globalStompClient.subscribe(userQueuePath, (message) => {
+      logService.debug('📥 收到个人队列原始消息回调被触发', {
+        bodyLength: message.body?.length,
+        bodyPreview: message.body?.substring(0, 200)
+      })
+
       try {
-        logService.debug('📥 收到个人队列消息')
         const data = JSON.parse(message.body)
+
+        logService.debug('📥 个人队列消息解析成功', {
+          type: data.type,
+          dataKeys: Object.keys(data),
+          hasData: !!data.data
+        })
 
         // 如果是第一次收到个人队列消息，标记订阅成功
         if (!userQueueSubscribed) {
           userQueueSubscribed = true
-          logService.info('✅ 个人队列订阅已确认')
+          logService.info('✅ 个人队列订阅已确认（首条消息已接收）')
         }
+
+        // ✅ 添加全局消息日志，监控所有消息（用于排查）
+        logService.debug('📥 【全局监控】个人队列消息详情', {
+          type: data.type,
+          fullMessage: JSON.stringify(data).substring(0, 500)
+        })
 
         // 处理不同类型的消息
         switch (data.type) {
@@ -237,6 +260,86 @@ function subscribeToAllTopics() {
           case 'timer_state':
             broadcastMessage('timer_state', data.data)
             break
+          case 'heartbeat_response':
+            // 心跳响应包含服务器时间
+            logService.info('💓 【关键】收到心跳响应 - 原始数据', {
+              fullData: data,
+              dataType: typeof data,
+              hasTimestamp: data && typeof data === 'object' && 'timestamp' in data,
+              hasDataField: data && typeof data === 'object' && 'data' in data,
+              dataKeys: data && typeof data === 'object' ? Object.keys(data) : 'N/A',
+              jsonString: JSON.stringify(data)
+            })
+
+            // 提取服务器时间戳
+            let serverTimestamp = null
+            let requestId = null
+
+            if (data && typeof data === 'object') {
+              // 检查data.data.timestamp（WebSocketMessageDTO包装格式）
+              if (data.data && data.data.timestamp) {
+                serverTimestamp = data.data.timestamp
+                requestId = data.data.requestId
+                logService.debug('📊 从data.data.timestamp获取时间戳（WebSocketMessageDTO格式）', {
+                  timestamp: serverTimestamp,
+                  requestId: requestId
+                })
+              }
+              // 兼容直接timestamp字段（旧格式）
+              else if (data.timestamp) {
+                serverTimestamp = data.timestamp
+                requestId = data.requestId
+                logService.debug('📊 从data.timestamp获取时间戳（直接Map格式）', {
+                  timestamp: serverTimestamp,
+                  requestId: requestId
+                })
+              } else {
+                logService.warn('⚠️ 心跳响应中未找到时间戳字段', { data: data })
+              }
+            } else if (typeof data === 'number') {
+              serverTimestamp = data
+              logService.debug('📊 data直接是数字时间戳', { timestamp: serverTimestamp })
+            } else {
+              logService.warn('⚠️ 心跳响应格式异常', { data: data, dataType: typeof data })
+            }
+
+            // 更新全局服务器时间戳并打印详细日志
+            if (serverTimestamp) {
+              const clientReceiveTime = Date.now()
+
+              // 从heartbeatTimestamps中获取发送时间
+              const heartbeatInfo = heartbeatTimestamps.get(requestId)
+              const clientSendTime = heartbeatInfo?.sendTime || clientReceiveTime
+              const roundTripTime = clientReceiveTime - clientSendTime
+              const timeDiff = serverTimestamp - clientReceiveTime
+
+              globalConnectionState.serverTimestamp = serverTimestamp
+
+              // 打印完整的心跳响应日志
+              logService.info('✅ 心跳响应处理完成', {
+                requestId: requestId,
+                clientSendTime: clientSendTime,
+                clientSendTimeISO: new Date(clientSendTime).toISOString(),
+                serverTimestamp: serverTimestamp,
+                serverTimeISO: new Date(serverTimestamp).toISOString(),
+                clientReceiveTime: clientReceiveTime,
+                clientReceiveTimeISO: new Date(clientReceiveTime).toISOString(),
+                roundTripTime: roundTripTime + 'ms',
+                timeDiff: timeDiff + 'ms (服务器时间 - 客户端接收时间)',
+                clientId: globalConnectionState.clientId
+              })
+
+              // 清理已处理的心跳记录
+              if (heartbeatInfo) {
+                heartbeatTimestamps.delete(requestId)
+              }
+            } else {
+              logService.warn('⚠️ 未能从心跳响应中提取服务器时间戳', { data: data })
+            }
+
+            // 广播心跳响应消息，传递完整数据
+            broadcastMessage('heartbeat_response', data)
+            break
           case 'error':
             logService.error('服务器返回错误', data.data)
             broadcastMessage('error', data.data)
@@ -246,18 +349,33 @@ function subscribeToAllTopics() {
             broadcastMessage(data.type, data.data)
         }
       } catch (error) {
-        logService.error('解析个人队列消息失败', { error: error.message })
+        logService.error('解析个人队列消息失败', {
+          error: error.message,
+          stack: error.stack,
+          messageBody: message.body?.substring(0, 300)
+        })
       }
     })
-    logService.info('✅ 个人队列订阅已创建')
+
+    logService.info('✅ 个人队列订阅已创建', {
+      subscriptionId: userQueueSubscription?.id,
+      path: userQueuePath
+    })
   } catch (error) {
-    logService.error('❌ 订阅个人队列失败', { error: error.message })
+    logService.error('❌ 订阅个人队列失败（在subscribe调用时）', {
+      error: error.message,
+      stack: error.stack
+    })
   }
 
   // ✅ 新增：立即订阅其他主题（不涉及计时状态）
-  subscribeToOtherTopics()
+  try {
+    subscribeToOtherTopics()
+  } catch (error) {
+    logService.error('❌ 订阅其他主题失败', { error: error.message })
+  }
 
-  logService.info('初始主题订阅完成（等待AB屏模式设置后再订阅计时器状态）')
+  logService.info('✅ 初始主题订阅完成（等待AB屏模式设置后再订阅计时器状态）')
   logService.event('WEB_SOCKET_INITIAL_SUBSCRIPTIONS_COMPLETE', {
     timestamp: new Date().toISOString()
   })
@@ -290,24 +408,68 @@ function subscribeToAllTopics() {
  */
 function startHeartbeat() {
   stopHeartbeat()
+
+  // 立即发送一次心跳以获取初始服务器时间
+  sendHeartbeatWithResponse()
+
   heartbeatInterval = setInterval(() => {
-    if (globalStompClient && globalStompClient.connected) {
-      try {
-        globalStompClient.publish({
-          destination: '/app/heartbeat',
-          body: JSON.stringify({
-            clientId: globalConnectionState.clientId,
-            clientType: globalConnectionState.clientType,
-            timestamp: Date.now()
-          })
-        })
-        logService.debug('💓 应用层心跳已发送')
-      } catch (e) {
-        logService.warn('应用层心跳发送失败', { error: e.message })
-      }
-    }
+    sendHeartbeatWithResponse()
   }, 60000) // 每60秒发送一次
   logService.info('应用层心跳已启动（60s间隔）')
+}
+
+/**
+ * 发送心跳并处理服务器时间响应
+ */
+function sendHeartbeatWithResponse() {
+  logService.debug('💓 准备发送心跳请求', {
+    hasGlobalStompClient: !!globalStompClient,
+    stompConnected: globalStompClient?.connected,
+    globalConnectionState: {
+      isConnected: globalConnectionState.isConnected,
+      clientId: globalConnectionState.clientId,
+      clientType: globalConnectionState.clientType
+    }
+  })
+
+  if (!globalStompClient || !globalStompClient.connected) {
+    logService.warn('WebSocket未连接，跳过心跳发送')
+    return
+  }
+
+  try {
+    // 生成唯一请求ID用于匹配响应
+    const requestId = Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    const clientSendTime = Date.now()
+
+    // 记录心跳发送时间，用于计算往返时间
+    heartbeatTimestamps.set(requestId, {
+      sendTime: clientSendTime,
+      clientId: globalConnectionState.clientId
+    })
+
+    logService.debug('💓 发送心跳请求', {
+      requestId,
+      clientId: globalConnectionState.clientId,
+      clientType: globalConnectionState.clientType,
+      destination: '/app/heartbeat',
+      clientSendTime: new Date(clientSendTime).toISOString()
+    })
+
+    globalStompClient.publish({
+      destination: '/app/heartbeat',
+      body: JSON.stringify({
+        clientId: globalConnectionState.clientId,
+        clientType: globalConnectionState.clientType,
+        timestamp: clientSendTime,
+        requestId: requestId
+      })
+    })
+
+    logService.debug('💓 心跳请求已发送', { requestId })
+  } catch (e) {
+    logService.warn('应用层心跳发送失败', { error: e.message })
+  }
 }
 
 /**
@@ -381,6 +543,17 @@ const socket = new SockJS(wsUrl)
     heartbeatIncoming: 15000,   // ✅ 改为15秒（从4秒）
     heartbeatOutgoing: 15000,   // ✅ 改为15秒（从4秒）
     heartbeatErrorMargin: 5000, // ✅ 添加5秒误差容限（新增）
+    // ✅ 添加消息拦截器，监控所有STOMP帧
+    onStompFrame: (frame) => {
+      if (frame.command === 'MESSAGE') {
+        logService.debug('🔥 【STOMP帧拦截】收到MESSAGE帧', {
+          command: frame.command,
+          headers: frame.headers,
+          bodyLength: frame.body?.length,
+          bodyPreview: frame.body?.substring(0, 200)
+        })
+      }
+    },
     onConnect: () => {
       logService.event('WEBSOCKET_CONNECTED', { reconnectAttempts })
       reconnectAttempts = 0

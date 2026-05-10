@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.annotation.SendToUser;
 import org.springframework.messaging.simp.annotation.SubscribeMapping;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -327,6 +328,39 @@ public class EnhancedWebSocketController {
     }
 
     /**
+     * 设置优先屏幕（仅AB交替模式下有效）
+     */
+    @MessageMapping("/timer/set-preferred-screen")
+    @SendTo("/topic/timer-state")
+    public TimerStateDTO setPreferredScreen(Map<String, Object> payload) {
+        String clientId = (String) payload.get("clientId");
+        String screen = (String) payload.get("screen");
+
+        log.info("📱 收到设置优先屏幕请求 - clientId: {}, screen: {}", clientId, screen);
+
+        // 参数验证
+        if (screen == null || (!screen.equals("A") && !screen.equals("B"))) {
+            log.warn("⚠️ 无效的优先屏幕参数: {}", screen);
+            return timerEngine.getState();
+        }
+
+        // 记录操作日志
+        logFileManager.logClientAction(clientId, "control", "SET_PREFERRED_SCREEN", screen);
+
+        try {
+            // 调用TimerEngine设置优先屏幕
+            timerEngine.setPreferredScreen(screen);
+            log.info("✅ 优先屏幕已设置为: {}", screen);
+            return timerEngine.getState();
+        } catch (Exception e) {
+            log.error("❌ 设置优先屏幕失败", e);
+            logFileManager.logError(clientId, "control", "SET_PREFERRED_SCREEN",
+                "设置失败: " + e.getMessage(), null);
+            return timerEngine.getState();
+        }
+    }
+
+    /**
      * 设置屏幕启用状态
      */
     @MessageMapping("/timer/set-screen-enabled")
@@ -578,6 +612,11 @@ public class EnhancedWebSocketController {
                 message.put("pauseOnSwitchTeam", matchType.getPauseOnSwitchTeam());
                 message.put("clientId", clientId);
                 message.put("timestamp", System.currentTimeMillis());
+                message.put("isRound", matchType.getIsRound());                 //是否开始比赛轮次纪律
+                message.put("launchRoundKeys", matchType.getLaunchRoundKeys());       //比赛轮次key集合
+                if(matchType.getIsRound()){
+                    message.put("launchRoundCurrentkey", matchType.getLaunchRoundKeys().get(0));       //比赛当前轮次key 用于覆盖比赛AB屏提示文案
+                }
 
                 messagingTemplate.convertAndSend("/topic/match-type-details", message);
                 log.info("广播比赛类型详细信息: {}", matchTypeId);
@@ -607,15 +646,49 @@ public class EnhancedWebSocketController {
     }
 
     /**
-     * 处理客户端应用层心跳，更新控制端最后活跃时间
+     * 处理客户端应用层心跳，更新控制端最后活跃时间并返回服务器当前时间戳
+     * 使用 @SendToUser 注解，让 Spring 自动处理用户路由
      */
     @MessageMapping("/heartbeat")
-    public void handleHeartbeat(Map<String, Object> payload) {
+    @SendToUser("/queue/messages")
+    public Map<String, Object> handleHeartbeat(Map<String, Object> payload, org.springframework.messaging.Message<?> message) {
+        SimpMessageHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(message);
+        String sessionId = headerAccessor.getSessionId();
         String clientId = payload != null ? (String) payload.get("clientId") : null;
+        Object requestId = payload != null ? payload.get("requestId") : null;
+
+        log.debug("💓 收到心跳请求 - sessionId: {}, clientId: {}, requestId: {}", sessionId, clientId, requestId);
+
+        if (sessionId == null) {
+            log.warn("⚠️ 心跳请求中sessionId为null，可能无法正确路由响应");
+        }
+
         if (clientId != null) {
             webSocketService.updateHeartbeat(clientId);
-            log.debug("💓 收到心跳 clientId: {}", clientId);
         }
+
+        // 返回服务器当前时间戳给客户端
+        long serverTimestamp = System.currentTimeMillis();
+
+        // 创建响应数据
+        Map<String, Object> responseData = new HashMap<>();
+        responseData.put("timestamp", serverTimestamp);
+        if (requestId != null) {
+            responseData.put("requestId", requestId);
+        }
+
+        // 使用WebSocketMessageDTO标准格式包装响应
+        Map<String, Object> response = new HashMap<>();
+        response.put("type", "heartbeat_response");
+        response.put("data", responseData);
+        response.put("timestamp", serverTimestamp);
+        response.put("clientId", clientId);
+
+        log.info("✅ 心跳响应已准备 (将通过 @SendToUser 自动路由) - sessionId: {}, timestamp: {}, requestId: {}",
+            sessionId, serverTimestamp, requestId);
+        log.debug("💓 心跳响应详情 - response: {}", response);
+
+        return response;
     }
 
     /**
@@ -651,4 +724,6 @@ public class EnhancedWebSocketController {
         // 允许的客户端类型列表
         return clientType.equals("control") || clientType.equals("display_a") || clientType.equals("display_b");
     }
+
+
 }
