@@ -88,6 +88,10 @@ const timerState = reactive({
   soundEnabled: true,
   volume: 80,
 
+  // 轮次信息
+  isRound: false,
+  roundRecord: null, // { launchRoundCurrentKey, round, launchRoundKeys, details }
+
   // 本地计时辅助字段（用于前端实时显示，不从后端同步）
   localDisplayRemaining: 0,  // 本地显示的剩余时间
   localLastUpdateTime: 0      // 本地上次更新时间

@@ -725,5 +725,16 @@ public class EnhancedWebSocketController {
         return clientType.equals("control") || clientType.equals("display_a") || clientType.equals("display_b");
     }
 
-
+    /**
+     * 最新轮次重跑
+     * ✅ 修复：使用统一的/topic/timer-state主题，确保前端能收到状态更新
+     */
+    @MessageMapping("/timer/round-delete")
+    @SendTo("/topic/timer-state")
+    public TimerStateDTO recordRoundDelete() {
+        log.info("收到最新轮次重跑请求");
+        timerEngine.recordRoundDelete();
+        timerEngine.resetTimer();
+        return timerEngine.getState();
+    }
 }

@@ -6,7 +6,6 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.stereotype.Service;
 
 import javax.annotation.PreDestroy;
 import java.time.LocalDateTime;
@@ -17,8 +16,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.springframework.util.CollectionUtils;
+import com.google.common.collect.Lists;
 
 @Slf4j
 public class TimerEngine {
@@ -289,6 +290,7 @@ public class TimerEngine {
             screenATotalPausedDuration = 0;
             screenBTotalPausedDuration = 0;
             this.isFirstStart = true;
+            previousStageIndex = -1;
 
             Integer compTime = currentState.getCompetitionTime();
             Integer prepTime = currentState.getPreparationTime();
@@ -527,8 +529,8 @@ public class TimerEngine {
             }
 
             // ✅ 重置AB屏的显示状态
-            currentState.setScreenARemaining(compTime);
-            currentState.setScreenBRemaining(compTime);
+            currentState.setScreenARemaining(prepTime);
+            currentState.setScreenBRemaining(prepTime);
             currentState.setScreenAStatus("paused");
             currentState.setScreenBStatus("paused");
             currentState.setActiveScreen("A");
@@ -600,8 +602,8 @@ public class TimerEngine {
             // 同步模式下，两个屏幕都显示相同内容
             screenATimerPausedAt = 0;
             screenBTimerPausedAt = 0;
-            screenATimerRemaining = currentState.getPreparationTime();
-            screenBTimerRemaining = currentState.getPreparationTime();
+            screenATimerRemaining = currentState.getPreparationTime() == null ? 0 : currentState.getPreparationTime();
+            screenBTimerRemaining = currentState.getPreparationTime() == null ? 0 : currentState.getPreparationTime();
         } else if ("only_a".equals(mode)) {
             currentState.setActiveScreen("A");
             currentState.setScreenAEnabled(true);
@@ -2302,5 +2304,76 @@ public class TimerEngine {
         }
         currentState.setRoundRecord(roundRecordDto);
 
+    }
+
+
+    /**
+     * 删除最新运行
+     */
+    public synchronized void recordRoundDelete(){
+        RoundRecordDto roundRecordDto = currentState.getRoundRecord();
+        List<RoundDetailDTO> details = roundRecordDto.getDetails();
+        RoundDetailDTO lastDetail =  details.get(details.size() - 1);
+
+        List<RoundDetailDTO> newDetails = Lists.newArrayList();
+        if("not_started".equals(lastDetail.getStatus())){
+            // 如果最新一条轮次是未开始 则删除当前轮次记录，并将上一次记录置为未开始
+            details.stream().forEach(e -> {
+                if( lastDetail.getNo()-1 == e.getNo()){
+                    e.setStatus("not_started");
+                    newDetails.add(e);
+                    roundRecordDto.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundKeys().get(e.getNoByRound()));
+                } else if(lastDetail.getNo() == e.getNo()){
+                    //最后一条体跳过
+                    if(lastDetail.getNoByRound() == 0){
+                        //如果当前记录轮次中序号是0 则是新开启轮次，需要将轮次记录中的轮次-1
+                        roundRecordDto.setRound(roundRecordDto.getRound()-1);
+                    }
+                } else {
+                    newDetails.add(e);
+                }
+            });
+        } else if("in_progress".equals(lastDetail.getStatus())){
+            // 如果最新一条是进行中 那么将最新一条数据修改状态未未开始
+            details.stream()
+                    .forEach(e -> {
+                        if(lastDetail.getNo() == e.getNo()){
+                            e.setStatus("not_started");
+                        }
+                        newDetails.add(e);
+                    });
+        }
+
+        roundRecordDto.setDetails(newDetails);
+        currentState.setRoundRecord(roundRecordDto);
+    }
+
+
+    /**
+     * 获取可重跑轮次名称
+     * @return 可重跑轮次名称
+     */
+    public synchronized String getCanAgainRound(){
+        RoundRecordDto roundRecordDto = currentState.getRoundRecord();
+        List<RoundDetailDTO> details = roundRecordDto.getDetails();
+        RoundDetailDTO lastDetail =  details.get(details.size() - 1);
+        AtomicReference<String> canAgainRoundDetail = new AtomicReference<>(""); //可重跑轮次名称
+        if("not_started".equals(lastDetail.getStatus())){
+            // 如果最新一条轮次是未开始 则删除当前轮次记录，并将上一次记录置为未开始
+            details.stream().forEach(e -> {
+                if( lastDetail.getNo()-1 == e.getNo()){
+                    canAgainRoundDetail.set(e.getRoundDescription());
+                }
+            });
+        } else if("in_progress".equals(lastDetail.getStatus())){
+            // 如果最新一条是进行中 那么将最新一条数据修改状态未未开始
+            details.stream()
+                    .forEach(e -> {
+                        if(lastDetail.getNo() == e.getNo()){
+                            canAgainRoundDetail.set(e.getRoundDescription());
+                        }
+                    });
+        }
+        return canAgainRoundDetail.get();
     }
 }

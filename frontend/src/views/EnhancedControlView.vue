@@ -36,7 +36,7 @@
           <div class="screen-content">
             <!-- 提示文案 -->
             <div class="screen-prompt">
-              {{ timerState.aprompt || '选手A准备' }}
+              {{ displayAPrompt }}
             </div>
 
             <!-- 屏幕状态 -->
@@ -90,7 +90,7 @@
           <div class="screen-content">
             <!-- 提示文案 -->
             <div class="screen-prompt">
-              {{ timerState.bprompt || '选手B准备' }}
+              {{ displayBPrompt }}
             </div>
 
             <!-- 屏幕状态 -->
@@ -355,13 +355,17 @@
           <div class="section-header">
             <el-icon><Edit /></el-icon>
             <span>AB屏提示文案</span>
+            <el-tag v-if="isRoundMode" size="small" type="warning" style="margin-left: 8px;">
+              轮次模式：提示文案不可修改
+            </el-tag>
           </div>
           <div class="section-content prompt-row">
             <div class="prompt-item">
               <label>A屏提示</label>
               <el-input
                 v-model="aPrompt"
-                placeholder="A屏提示文本"
+                :placeholder="isRoundMode ? '轮次模式中...' : 'A屏提示文本'"
+                :disabled="isRoundMode"
                 @change="updatePrompt('A', aPrompt)"
               />
             </div>
@@ -369,10 +373,17 @@
               <label>B屏提示</label>
               <el-input
                 v-model="bPrompt"
-                placeholder="B屏提示文本"
+                :placeholder="isRoundMode ? '轮次模式中...' : 'B屏提示文本'"
+                :disabled="isRoundMode"
                 @change="updatePrompt('B', bPrompt)"
               />
             </div>
+
+            <!-- 轮次模式提示 -->
+<!--            <div v-if="isRoundMode" class="round-mode-hint">-->
+<!--              <el-icon><InfoFilled /></el-icon>-->
+<!--              <span>轮次模式中，提示文案自动显示当前轮次内容</span>-->
+<!--            </div>-->
           </div>
         </div>
 
@@ -484,6 +495,53 @@
           </div>
         </div>
 
+        <!-- 轮次信息展示（仅当isRound为true时显示） -->
+        <div class="control-section round-info-section" v-if="timerState.isRound && timerState.roundRecord">
+          <div class="section-header">
+            <div class="section-header-left">
+              <el-icon><Trophy /></el-icon>
+              <span>轮次信息</span>
+            </div>
+            <div class="section-header-right">
+              <el-button
+                type="warning"
+                size="small"
+                :disabled="!canRoundRestart"
+                @click="handleRoundRestart"
+                :icon="Refresh"
+              >
+                轮次重跑
+              </el-button>
+            </div>
+          </div>
+          <div class="section-content round-info-content">
+            <div class="round-info-list">
+              <div
+                v-for="detail in timerState.roundRecord.details"
+                :key="detail.no"
+                class="round-info-item"
+                :class="{
+                  'not-started': detail.status === 'not_started',
+                  'in-progress': detail.status === 'in_progress',
+                  'ended': detail.status === 'ended'
+                }"
+              >
+                <span class="round-no">{{ detail.no }}.</span>
+                <span class="round-description">{{ detail.roundDescription }}</span>
+                <el-tag size="small" :type="getRoundStatusTagType(detail.status)">
+                  {{ getRoundStatusText(detail.status) }}
+                </el-tag>
+              </div>
+            </div>
+
+            <!-- 当前轮次提示 -->
+            <div class="current-round-info" v-if="timerState.roundRecord.launchRoundCurrentKey">
+              <el-icon><InfoFilled /></el-icon>
+              <span>当前轮次：{{ timerState.roundRecord.launchRoundCurrentKey }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- AB交替规则说明 -->
 <!--        <div class="control-section rule-section" :style="{ visibility: (screenMode === 'alternate' && currentMatchType) ? 'visible' : 'hidden' }">-->
       <div class="control-section rule-section" >
@@ -517,14 +575,14 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useEnhancedTimerStore } from '../stores/enhancedTimer'
 import { useBuzzer } from '../composables/useBuzzer'
 import { logService } from '../services/logService'
 import { subscribeToTimerState } from '../services/globalWebSocketService'
 import {
   Trophy, Clock, Monitor, Edit, Setting, VideoPlay, VideoPause,
-  RefreshRight, Switch, Bell, Headset, CopyDocument, InfoFilled,
+  RefreshRight, Refresh, Switch, Bell, Headset, CopyDocument, InfoFilled,
   Connection, User, CircleCheckFilled, SwitchFilled, Key, Star
 } from '@element-plus/icons-vue'
 
@@ -575,6 +633,59 @@ const preferredScreen = ref('A') // 优先屏幕，默认A屏优先
 // 声音控制
 const volume = ref(80)
 const soundEnabled = ref(true)
+
+// 轮次相关方法和计算属性
+const isRoundMode = computed(() => {
+  // 轮次模式需要满足两个条件：
+  // 1. timerState.isRound 为 true（后端状态）
+  // 2. 当前比赛类型支持轮次模式（currentMatchType.isRound 为 true）
+  return timerState.isRound && timerState.roundRecord && currentMatchType.value?.isRound
+})
+
+const displayAPrompt = computed(() => {
+  // 只有在当前比赛类型支持轮次模式且确实处于轮次模式时，才显示轮次内容
+  if (currentMatchType.value?.isRound && timerState.isRound && timerState.roundRecord?.launchRoundCurrentKey) {
+    return timerState.roundRecord.launchRoundCurrentKey
+  }
+  return timerState.aprompt || '选手A准备'
+})
+
+const displayBPrompt = computed(() => {
+  // 只有在当前比赛类型支持轮次模式且确实处于轮次模式时，才显示轮次内容
+  if (currentMatchType.value?.isRound && timerState.isRound && timerState.roundRecord?.launchRoundCurrentKey) {
+    return timerState.roundRecord.launchRoundCurrentKey
+  }
+  return timerState.bprompt || '选手B准备'
+})
+
+const getRoundStatusText = (status) => {
+  const statusMap = {
+    'not_started': '未开始',
+    'in_progress': '进行中',
+    'ended': '已结束'
+  }
+  return statusMap[status] || status
+}
+
+const getRoundStatusTagType = (status) => {
+  const typeMap = {
+    'not_started': 'info',
+    'in_progress': 'primary',
+    'ended': 'success'
+  }
+  return typeMap[status] || 'info'
+}
+
+// 轮次重跑按钮状态控制
+const canRoundRestart = computed(() => {
+  // 按钮可用条件：倒计时器非运行中（状态为暂停 / 已结束 / 未开始）
+  const isTimerNotRunning = timerState.status !== 'running'
+
+  // 同时需要处于轮次模式
+  const isInRoundMode = timerState.isRound && timerState.roundRecord
+
+  return isTimerNotRunning && isInRoundMode
+})
 
 // 计算属性
 const totalTime = computed(() => {
@@ -717,7 +828,7 @@ const fetchEnhancedMatchTypes = async () => {
   }
 }
 
-const loadMatchTypeConfig = (matchType) => {
+const loadMatchTypeConfig = async (matchType) => {
   if (!matchType) return
 
   // ✅ 严格遵循"后端单一数据源"原则
@@ -733,21 +844,65 @@ const loadMatchTypeConfig = (matchType) => {
   aPrompt.value = matchType.defaultAPrompt || 'A屏'
   bPrompt.value = matchType.defaultBPrompt || 'B屏'
 
-  // 发送到服务器
-  updatePrompt('A', aPrompt.value)
-  updatePrompt('B', bPrompt.value)
-  handleScreenModeChange(screenMode.value)
+  // ✅ 新的延迟调用链 - 每个接口间隔200ms
+  logService.info('🚀 开始配置应用，使用200ms间隔调用链')
 
-  // 选择比赛类型，后端会返回完整状态（包括计算的currentStageRemaining）
-  if (timerStore.connectionState.isConnected) {
+  if (!timerStore.connectionState.isConnected) {
+    logService.warn('WebSocket未连接，跳过配置')
+    return
+  }
+
+  // 使用async/await和setTimeout创建延迟链
+  const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+  try {
+    // 1. 设置A屏提示
+    logService.info('1. 设置A屏提示文案')
+    timerStore.setPrompt('A', aPrompt.value)
+    await delay(200)
+
+    // 2. 设置B屏提示
+    logService.info('2. 设置B屏提示文案')
+    timerStore.setPrompt('B', bPrompt.value)
+    await delay(200)
+
+    // 3. 设置AB屏模式
+    logService.info('3. 设置AB屏模式', { mode: screenMode.value })
+    timerStore.setABMode(screenMode.value)
+    await delay(200)
+
+    // 4. 选择比赛类型（AB屏模式已设置，后端可以正确处理）
+    logService.info('4. 选择比赛类型', { matchTypeId: matchType.id })
     timerStore.selectMatchType(matchType.id)
-    // ✅ 发送时间配置给后端，让后端计算并广播
+    await delay(200)
+
+    // 5. 设置时间配置
     const config = {
       preparation: preparationTime.value,
       competition: competitionTime.value,
       yellowLight: yellowLightTime.value
     }
+    logService.info('5. 设置时间配置', config)
     timerStore.sendGlobalWebSocketMessage('timer/set-time-config', config)
+    await delay(200)
+
+    // 6. 重置计时器到初始状态
+    logService.info('6. 重置计时器（应用所有配置）')
+    timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+    await delay(200)
+
+    // 7. 订阅计时器状态主题（确保AB屏模式已设置）
+    logService.info('7. 订阅计时器状态主题')
+    subscribeToTimerState()
+    await delay(200)
+
+    // 8. 主动请求后端广播当前完整状态
+    logService.info('8. 请求后端广播当前状态')
+    timerStore.requestBroadcastState()
+
+    logService.info('✅ 配置应用完成，所有接口已按顺序调用（间隔200ms）')
+  } catch (error) {
+    logService.error('配置应用过程中出错', { error: error.message })
   }
 }
 
@@ -819,9 +974,9 @@ const handleScreenModeChange = (mode) => {
       // 重置AB屏和控制按钮到初始状态
       resetABScreenState()
 
-      // ✅ 关键修复：屏幕模式变更后发送后端重置消息
-      logService.info('屏幕模式已变更，发送后端重置消息', { mode })
-      timerStore.sendGlobalWebSocketMessage('timer/reset', {})
+      // ⚠️ 注意：在loadMatchTypeConfig的延迟链中会统一调用reset
+      // 这里不单独调用reset，避免重复调用
+      logService.info('屏幕模式已变更（reset将在配置链中统一调用）', { mode })
 
       // ✅ 新增：延迟订阅计时器状态主题（确保AB模式已设置）
       setTimeout(() => {
@@ -944,6 +1099,20 @@ const onTimeConfigBlur = () => {
 
 const updatePrompt = (screen, prompt) => {
   logService.debug(`更新${screen}屏提示文案: "${prompt}"，连接状态:`, timerStore.connectionState)
+
+  // ✅ 改进：更精确的轮次模式判断
+  // 不仅检查timerState.isRound，还要检查当前比赛类型是否支持轮次模式
+  const isInRoundMode = isRoundMode.value
+  const currentMatchTypeIsRound = currentMatchType.value?.isRound
+
+  // 只有在确实处于轮次模式时才阻止修改
+  // 避免从轮次模式切换到非轮次模式时的过渡期误判
+  if (isInRoundMode && currentMatchTypeIsRound) {
+    logService.warn(`⚠️ 轮次模式中，禁止修改${screen}屏提示文案`)
+    ElMessage.warning('轮次模式中，提示文案自动显示当前轮次内容，无法手动修改')
+    return
+  }
+
   if (timerStore.connectionState.isConnected && timerStore.connectionState.clientId) {
     // ✅ 连接已建立，直接发送到服务器
     timerStore.setPrompt(screen, prompt)
@@ -960,6 +1129,60 @@ const updatePrompt = (screen, prompt) => {
 
     // 📝 标记待发送状态，当连接建立后会自动重新发送
     // 这确保即使用户在连接前修改了提示文案，也不会丢失
+  }
+}
+
+// 轮次重跑处理
+const handleRoundRestart = async () => {
+  if (!canRoundRestart.value) {
+    ElMessage.warning('当前状态下无法执行轮次重跑操作')
+    return
+  }
+
+  try {
+    // 1. 调用后端接口获取可重跑的轮次名称
+    logService.info('请求获取可重跑的轮次信息')
+    const response = await fetch('/api/timer/can-again-round')
+
+    if (!response.ok) {
+      throw new Error(`HTTP错误: ${response.status}`)
+    }
+
+    const roundDescription = await response.text()
+
+    if (!roundDescription) {
+      ElMessage.warning('当前没有可重跑的轮次')
+      return
+    }
+
+    // 2. 弹出确认框
+    ElMessageBox.confirm(
+      `是否要将「${roundDescription}」重跑？`,
+      '轮次重跑确认',
+      {
+        confirmButtonText: '确认',
+        cancelButtonText: '取消',
+        type: 'warning',
+        center: true
+      }
+    ).then(async () => {
+      // 3. 用户点击确认，调用后端接口提交重跑请求
+      logService.info('用户确认轮次重跑，提交请求', { roundDescription })
+
+      if (timerStore.connectionState.isConnected) {
+        timerStore.sendGlobalWebSocketMessage('timer/round-delete', {})
+        ElMessage.success('轮次重跑请求已提交，等待结果...')
+      } else {
+        ElMessage.error('WebSocket未连接，无法提交重跑请求')
+      }
+    }).catch(() => {
+      // 用户点击取消
+      logService.info('用户取消轮次重跑操作')
+    })
+
+  } catch (error) {
+    logService.error('轮次重跑操作失败', error)
+    ElMessage.error(`轮次重跑失败: ${error.message}`)
   }
 }
 
@@ -1054,12 +1277,25 @@ watch(() => timerState, (newState) => {
   soundEnabled.value = newState.soundEnabled
   volume.value = newState.volume || 80
 
-  if (newState.aPrompt && newState.aPrompt !== aPrompt.value) {
-    aPrompt.value = newState.aPrompt
-  }
+  // 检查是否处于轮次模式
+  const isInRoundMode = newState.isRound && newState.roundRecord
+  const currentMatchTypeIsRound = currentMatchType.value?.isRound
 
-  if (newState.bPrompt && newState.bPrompt !== bPrompt.value) {
-    bPrompt.value = newState.bPrompt
+  // 更新AB屏提示文案
+  // 只有当前比赛类型支持轮次模式且后端状态处于轮次模式时，才显示轮次内容
+  if (isInRoundMode && currentMatchTypeIsRound && newState.roundRecord?.launchRoundCurrentKey) {
+    // 轮次模式中：更新输入框显示当前轮次内容
+    aPrompt.value = newState.roundRecord.launchRoundCurrentKey
+    bPrompt.value = newState.roundRecord.launchRoundCurrentKey
+  } else {
+    // 非轮次模式：正常更新输入框的值
+    if (newState.aPrompt && newState.aPrompt !== aPrompt.value) {
+      aPrompt.value = newState.aPrompt
+    }
+
+    if (newState.bPrompt && newState.bPrompt !== bPrompt.value) {
+      bPrompt.value = newState.bPrompt
+    }
   }
 
   if (newState.abMode && newState.abMode !== screenMode.value) {
@@ -1263,6 +1499,7 @@ const subscribeToTopics = () => {
 .section-header-right {
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .section-content {
@@ -1423,6 +1660,74 @@ const subscribeToTopics = () => {
 
 .rule-item strong {
   color: #303133;
+}
+
+/* 轮次信息样式 */
+.round-info-section {
+  margin-top: 20px;
+}
+.round-info-content {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.round-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.round-info-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background-color: #f5f7fa;
+  border-left: 3px solid #909399;
+}
+.round-info-item.not-started {
+  border-left-color: #909399;
+  background-color: #f5f7fa;
+}
+.round-info-item.in-progress {
+  border-left-color: #409eff;
+  background-color: #e8f4ff;
+}
+.round-info-item.ended {
+  border-left-color: #67c23a;
+  background-color: #f0f9eb;
+}
+.round-no {
+  font-weight: bold;
+  color: #303133;
+  min-width: 24px;
+}
+.round-description {
+  flex: 1;
+  color: #606266;
+}
+.current-round-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed #e4e7ed;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #409eff;
+  font-size: 14px;
+}
+
+/* 轮次模式提示样式 */
+.round-mode-hint {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background-color: #fff6f6;
+  border-radius: 4px;
+  border-left: 3px solid #e6a23c;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #e6a23c;
 }
 
 /* 屏幕预览头部 */
@@ -1920,6 +2225,18 @@ const subscribeToTopics = () => {
       color: #909399;
       line-height: 1.4;
       height: 18px;
+  }
+
+  /* 轮次信息容器响应式调整 */
+  .round-info-content {
+    max-height: 200px;
+  }
+  .round-info-item {
+    padding: 6px 8px;
+    font-size: 13px;
+  }
+  .round-no {
+    min-width: 20px;
   }
 }
 </style>

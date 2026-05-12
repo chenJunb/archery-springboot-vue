@@ -34,4 +34,14 @@ public class TimerController {
         Map<String, MatchTypeDTO> matchTypes = timerEngine.getAllMatchTypes();
         return ResponseEntity.ok(matchTypes);
     }
+
+    /**
+     * 获取可重跑的轮次信息
+     * @return 可重跑的轮次描述，如果没有可重跑的轮次则返回空字符串
+     */
+    @GetMapping("/can-again-round")
+    public ResponseEntity<String> getCanAgainRound() {
+        String canAgainRound = timerEngine.getCanAgainRound();
+        return ResponseEntity.ok(canAgainRound);
+    }
 }
