@@ -1,67 +1,38 @@
 <template>
-  <div class="enhanced-display-view display-b" :class="{ 'full-screen': isFullScreen }">
-    <!-- 连接状态 -->
-    <div class="connection-status" :class="connectionClass">
-      <el-icon><Connection /></el-icon>
-      <span>{{ connectionText }}</span>
-      <span class="screen-label">B屏</span>
+  <div class="enhanced-display-b">
+    <!-- B屏全屏沉浸式展示 -->
+    <div class="full-screen-container">
+      <!-- 提示文案 -->
+      <div class="screen-prompt">
+        {{ displayBPrompt }}
+      </div>
+
+      <!-- 屏幕状态 -->
+      <div class="screen-status">
+        <!-- 倒计时时间 -->
+        <div class="screen-timer">
+          <div class="timer-value">{{ timerState.screenBRemaining }}</div>
+        </div>
+
+        <!-- 圆形状态灯 -->
+        <div class="status-light" :style="{ backgroundColor: screenBLightColor }">
+          <div class="light-glow"></div>
+        </div>
+
+        <!-- 屏幕状态标签 -->
+        <div class="screen-status-tag" :class="{
+          running: timerState.screenBStatus === 'running',
+          paused: timerState.screenBStatus !== 'running'
+        }">
+          {{ timerState.screenBStatus === 'running' ? '运行中' : '已暂停' }}
+        </div>
+      </div>
     </div>
 
-    <!-- 主显示区 -->
-    <div class="main-display" :class="{ active: isActiveScreen }">
-      <!-- 顶部信息栏 -->
-      <div class="top-info">
-        <div class="match-type">{{ timerState.matchTypeName || '未选择比赛类型' }}</div>
-        <div class="ab-mode">{{ abModeText }}</div>
-        <div class="control-info" v-if="timerState.controlClientId">
-          控制端: {{ getControlClientName() }}
-        </div>
-      </div>
-
-      <!-- 中心显示区 -->
-      <div class="center-display">
-        <!-- 提示文案 -->
-        <div class="screen-prompt">
-          {{ timerState.bprompt || '选手B准备' }}
-        </div>
-
-        <!-- 屏幕状态 -->
-        <div class="screen-status">
-          <!-- 圆形状态灯 -->
-          <div class="status-light" :style="{ backgroundColor: currentLightColor, boxShadow: `0 0 40px ${currentLightColor}50` }">
-            <div class="light-glow"></div>
-          </div>
-
-          <!-- 倒计时时间 -->
-          <div class="screen-timer">
-            <div class="timer-label">剩余时间</div>
-            <div class="timer-value">{{ timerState.screenBRemaining }}</div>
-          </div>
-
-        </div>
-
-        <!-- 当前阶段信息 -->
-        <div class="stage-info">
-          <div class="stage-name" :style="{ color: currentLightColor }">{{ timerState.screenBStageName || '准备阶段' }}</div>
-          <div class="stage-timer">{{ timerState.screenBRemaining }}</div>
-        </div>
-      </div>
-
-      <!-- 底部状态栏 -->
-      <div class="bottom-status">
-        <div class="status-item">
-          <el-icon><User /></el-icon>
-          <span>在线: {{ timerState.connectedClients }}</span>
-        </div>
-        <div class="status-item">
-          <el-icon><Timer /></el-icon>
-          <span>总时间: {{ Math.round(timerState.totalRemaining) }}</span>
-        </div>
-        <div class="status-item">
-          <el-icon><Clock /></el-icon>
-          <span>{{ currentTime }}</span>
-        </div>
-      </div>
+    <!-- 连接状态指示（仅在未连接时显示） -->
+    <div class="connection-status" :class="connectionClass" v-if="showConnectionStatus">
+      <el-icon><Connection /></el-icon>
+      <span>{{ connectionText }}</span>
     </div>
 
     <!-- 全屏按钮 -->
@@ -69,119 +40,84 @@
       <el-icon v-if="!isFullScreen"><FullScreen /></el-icon>
       <el-icon v-else><Close /></el-icon>
     </div>
-
-    <!-- 声音状态指示 -->
-    <div class="sound-indicator" :class="{ muted: !timerState.soundEnabled }">
-      <el-icon><Headset /></el-icon>
-      <span>{{ timerState.soundEnabled ? '声音开' : '声音关' }}</span>
-    </div>
-
-    <!-- 屏幕状态标签 -->
-    <div class="screen-status-tag" :class="{
-                running: timerState.screenBStatus === 'running',
-                paused: timerState.screenBStatus !== 'running'
-              }">
-      {{ timerState.screenBStatus === 'running' ? '运行中' : '已暂停' }}
-    </div>
-
-    <!-- AB交替模式说明（当需要时显示） -->
-    <div class="alternate-info" v-if="showAlternateInfo">
-      <div class="info-content">
-        <div class="info-title">AB交替模式规则</div>
-        <div class="info-rules">
-          <div class="rule-item">
-            <el-icon><CircleCheckFilled /></el-icon>
-            准备阶段：AB屏同步倒计时
-          </div>
-          <div class="rule-item">
-            <el-icon><CircleCheckFilled /></el-icon>
-            绿灯阶段：A屏倒计时，B屏暂停
-          </div>
-          <div v-if="timerState.matchTypeCategory === 'individual'" class="rule-item">
-            <el-icon><SwitchFilled /></el-icon>
-            个人赛：切换时原屏清零，新屏重新开始
-          </div>
-          <div v-if="timerState.matchTypeCategory === 'team' || timerState.matchTypeCategory === 'mixed_team'" class="rule-item">
-            <el-icon><SwitchFilled /></el-icon>
-            团队赛：切换时原屏暂停保留，新屏继续
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useEnhancedTimerStore } from '../stores/enhancedTimer'
 import { subscribeToTimerState } from '../services/globalWebSocketService'
 import { useBuzzer } from '../composables/useBuzzer'
 import { logService } from '../services/logService'
-import { Connection, User, Timer, Clock, Headset, FullScreen, Close, CircleCheckFilled, SwitchFilled } from '@element-plus/icons-vue'
+import { Connection, FullScreen, Close } from '@element-plus/icons-vue'
 
 const timerStore = useEnhancedTimerStore()
 const timerState = timerStore.timerState
 const buzzer = useBuzzer()
 
+// 状态
+const isFullScreen = ref(false)
+const showConnectionStatus = ref(true)
+const screenMode = ref('alternate') // 默认交替模式，从timerState获取更准确
+
 // 初始化音频上下文
 onMounted(() => {
-  // ✅ 修复：检查初始化结果，并记录日志
   const audioInitialized = buzzer.initAudioContext()
-
   if (!audioInitialized) {
     logService.warn('B屏: 音频初始化失败')
   } else {
     logService.debug('B屏: 音频初始化成功')
   }
 
-  logService.event('BUZZER_INITIALIZED', { isMuted: buzzer.isMuted.value, audioInitialized })
-})
+  // 自动连接
+  timerStore.autoConnect()
 
-// 状态
-const isFullScreen = ref(false)
-const showAlternateInfo = ref(false)
-const previousLightColor = ref(null)
-const lastBuzzedPhase = ref(null)
-const lastBuzzTime = ref(0)  // ✅ 新增：记录上次鸣笛的时间戳
-const buzzCooldownMs = 500   // ✅ 新增：鸣笛冷却时间（毫秒），防止频繁鸣笛
+  // 等待连接建立后订阅主题
+  const checkAndSubscribe = () => {
+    if (timerStore.connectionState.isConnected) {
+      logService.debug('✅ WebSocket 已连接，立即订阅主题')
+      timerStore.subscribeToTopics()
+      subscribeToTimerState()
+      timerStore.requestBroadcastState()
 
-// 计算属性
-const isActiveScreen = computed(() => {
-  return timerStore.isActiveScreen('B')
-})
-
-const connectionClass = computed(() => {
-  if (!timerStore.connectionState.isConnected) return 'disconnected'
-  if (!isActiveScreen.value) return 'waiting'
-  return 'active'
-})
-
-const connectionText = computed(() => {
-  if (!timerStore.connectionState.isConnected) return '离线'
-  if (!isActiveScreen.value) return '等待切换'
-  return '活动屏幕'
-})
-
-const abModeText = computed(() => {
-  const mode = timerState.abMode
-  switch (mode) {
-    case 'sync': return '同步模式'
-    case 'alternate': return 'AB交替模式'
-    case 'only_a': return '仅A屏模式'
-    case 'only_b': return '仅B屏模式'
-    default: return mode
+      // 连接成功后隐藏连接状态
+      setTimeout(() => {
+        showConnectionStatus.value = false
+      }, 2000)
+    } else {
+      logService.debug('⏳ 等待 WebSocket 连接建立...')
+      setTimeout(checkAndSubscribe, 500)
+    }
   }
+  checkAndSubscribe()
+
+  // 添加全屏变化监听
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
 })
 
-const currentLightColor = computed(() => {
-  // ✅ 改进：所有模式下优先使用B屏的独立阶段颜色
-  // B屏显示屏由后端计算的B屏阶段数据
+onUnmounted(() => {
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+})
+
+// 计算属性（与控制台保持一致）
+const displayBPrompt = computed(() => {
+  // 只有在当前比赛类型支持轮次模式且确实处于轮次模式时，才显示轮次内容
+  // 注意：这里需要获取currentMatchType，但在独立页面中可能没有这个数据
+  // 暂时使用与控制台相同的逻辑
+  if (timerState.isRound && timerState.roundRecord?.launchRoundCurrentKey) {
+    return timerState.roundRecord.launchRoundCurrentKey
+  }
+  return timerState.bPrompt || '选手B准备'
+})
+
+const screenBLightColor = computed(() => {
+  // 优先使用B屏独立的阶段颜色
   if (timerState.screenBStageColor) {
     return timerState.screenBStageColor
   }
 
-  // 备选：根据当前阶段名称计算灯色（兼容其他情况）
+  // 备选：根据当前阶段名称计算灯色
   const stageName = timerState.currentStageName
   if (!stageName) return '#FF0000'
 
@@ -190,56 +126,20 @@ const currentLightColor = computed(() => {
   return '#00FF00' // 绿色
 })
 
-const currentScreenRemaining = computed(() => {
-  return timerState.screenBRemaining || timerState.currentStageRemaining
+// 连接状态
+const connectionClass = computed(() => {
+  if (!timerStore.connectionState.isConnected) return 'disconnected'
+  if (!timerStore.isActiveScreen('B')) return 'waiting'
+  return 'connected'
 })
 
-// ✅ 改进：交替模式下根据屏幕状态显示正确的倒计时
-const displayRemaining = computed(() => {
-  if (timerState.abMode === 'alternate') {
-    // 交替模式：显示该屏幕的实时倒计时
-    // 如果该屏幕是活跃的且正在运行，使用全局实时倒计时
-    if (timerStore.isActiveScreen('B') && timerState.screenBStatus === 'running') {
-      return timerStore.getDisplayRemaining()
-    }
-    // 否则显示该屏幕的当前剩余时间（可能是暂停或等待）
-    return timerState.screenBRemaining || 0
-  }
-  // 其他模式：使用全局实时倒计时
-  return timerStore.getDisplayRemaining()
+const connectionText = computed(() => {
+  if (!timerStore.connectionState.isConnected) return '离线'
+  if (!timerStore.isActiveScreen('B')) return '等待切换'
+  return '已连接'
 })
 
-const screenStatus = computed(() => {
-  // 判断当前屏幕状态
-  if (timerState.abMode === 'alternate') {
-    return timerState.screenBStatus || 'paused'
-  }
-  return timerState.status === 'running' ? 'running' : 'paused'
-})
-
-const screenStatusText = computed(() => {
-  switch (screenStatus.value) {
-    case 'running': return '运行中'
-    case 'paused': return '已暂停'
-    default: return '等待中'
-  }
-})
-
-const currentTime = computed(() => {
-  const now = new Date()
-  return now.toLocaleTimeString('zh-CN', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-})
-
-const getControlClientName = () => {
-  // 简化的控制端名称获取
-  return timerState.controlClientId ? '控制端' : '未知'
-}
-
+// 方法
 const toggleFullScreen = () => {
   isFullScreen.value = !isFullScreen.value
   if (isFullScreen.value) {
@@ -249,184 +149,132 @@ const toggleFullScreen = () => {
   }
 }
 
-// 监听全屏变化
 const handleFullscreenChange = () => {
   isFullScreen.value = !!document.fullscreenElement
 }
-
-// 连接和初始化
-const initializeConnection = () => {
-  // 显示连接状态
-  setTimeout(() => {
-    if (!timerStore.connectionState.isConnected) {
-      ElMessage.warning('正在连接服务器...')
-    }
-  }, 1000)
-}
-
-// 声音播放与自动鸣笛系统
-const playSound = () => {
-  if (!timerState.soundEnabled) return
-
-  // ✅ 改进：使用阶段变化时间戳而不仅是名称
-  const now = Date.now()
-  const stageName = timerState.currentStageName || ''
-  const currentPhase = stageName.includes('准备') ? 'prepare' :
-                       stageName.includes('比赛') || stageName.includes('射击') ? 'competition' : null
-
-  // ✅ 修复：添加冷却时间，防止快速重复鸣笛
-  if (currentPhase && (currentPhase !== lastBuzzedPhase.value || now - lastBuzzTime.value > buzzCooldownMs)) {
-    lastBuzzedPhase.value = currentPhase
-    lastBuzzTime.value = now
-
-    if (stageName.includes('准备')) {
-      logService.event('STAGE_TRANSITION', { stage: '准备', action: '发出1声鸣笛', time: now })
-      buzzer.buzz1()
-    } else if (stageName.includes('比赛') || stageName.includes('射击')) {
-      logService.event('STAGE_TRANSITION', { stage: '比赛', action: '发出2声鸣笛', time: now })
-      buzzer.buzz2()
-    }
-  }
-}
-
-// 监听灯色变化以触发3声鸣笛（GREEN→YELLOW）
-const checkLightColorTransition = () => {
-  if (!timerState.soundEnabled) return
-
-  const currentColor = currentLightColor.value
-
-  // ✅ 修复：重置previousLightColor当计时器空闲时
-  if (timerState.status === 'idle') {
-    previousLightColor.value = null
-    lastBuzzedPhase.value = null
-    lastBuzzTime.value = 0
-    return
-  }
-
-  // 检测GREEN→YELLOW转换
-  if (previousLightColor.value === '#00FF00' && currentColor === '#FFFF00') {
-    logService.event('LIGHT_TRANSITION', { from: 'GREEN', to: 'YELLOW', action: '发出3声鸣笛' })
-    buzzer.buzz3()
-    lastBuzzTime.value = Date.now()
-  }
-
-  previousLightColor.value = currentColor
-}
-
-// 观察阶段变化以自动播放声音
-watch(() => timerState.currentStageName, () => {
-  playSound()
-})
-
-// 监听灯色变化
-watch(() => currentLightColor.value, () => {
-  checkLightColorTransition()
-})
-
-// 生命周期
-onMounted(() => {
-  // 自动连接
-  timerStore.autoConnect()
-
-  // ✅ 等待连接建立后再订阅主题
-  // 原因：subscribeToTopics() 需要 WebSocket 已连接
-  const checkAndSubscribe = () => {
-    if (timerStore.connectionState.isConnected) {
-      logService.debug('✅ WebSocket 已连接，立即订阅主题')
-      timerStore.subscribeToTopics()
-      subscribeToTimerState()
-      timerStore.requestBroadcastState()
-    } else {
-      logService.debug('⏳ 等待 WebSocket 连接建立...')
-      setTimeout(checkAndSubscribe, 500)
-    }
-  }
-  checkAndSubscribe()
-
-  // 监听连接状态
-  initializeConnection()
-
-  // 添加事件监听
-  document.addEventListener('fullscreenchange', handleFullscreenChange)
-
-  // 添加键盘快捷键
-  document.addEventListener('keydown', handleKeyDown)
-})
-
-onUnmounted(() => {
-  timerStore.disconnect()
-  document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  document.removeEventListener('keydown', handleKeyDown)
-})
-
-// 键盘快捷键
-const handleKeyDown = (event) => {
-  switch (event.key) {
-    case 'F11':
-      event.preventDefault()
-      toggleFullScreen()
-      break
-    case 'Escape':
-      if (isFullScreen.value) {
-        isFullScreen.value = false
-      }
-      break
-    case 'i':
-    case 'I':
-      // 切换信息显示
-      showAlternateInfo.value = !showAlternateInfo.value
-      break
-  }
-}
-
-watch(() => timerState.currentStageName, (newStage, oldStage) => {
-  if (newStage && newStage !== oldStage) {
-    // 显示阶段变化提示
-    if (isActiveScreen.value) {
-      logService.debug(`阶段变化: ${oldStage} -> ${newStage}`)
-    }
-  }
-})
-
-watch(() => timerState.screenBStatus, (newStatus, oldStatus) => {
-  if (newStatus && newStatus !== oldStatus) {
-    logService.debug(`B屏状态变化: ${oldStatus} -> ${newStatus}`)
-  }
-})
-
-watch(() => timerState.status, (newStatus, oldStatus) => {
-  if (newStatus && newStatus !== oldStatus) {
-    logService.debug(`计时器状态变化: ${oldStatus} -> ${newStatus}`)
-
-    // 计时结束提示
-    if (newStatus === 'finished') {
-      if (isActiveScreen.value) {
-        logService.info('计时结束！')
-      }
-    }
-  }
-})
 </script>
 
 <style scoped>
-.enhanced-display-view {
+.enhanced-display-b {
   height: 100vh;
-  background-color: #000;
-  color: #fff;
+  width: 100vw;
+  background-color: #000000;
   position: relative;
   overflow: hidden;
-  font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif;
 }
 
-.enhanced-display-view.full-screen {
-  background-color: #000;
+/* 全屏容器 */
+.full-screen-container {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 提示文案 */
+.screen-prompt {
+  font-size: 36px;
+  font-weight: bold;
+  text-align: center;
+  color: #fff;
+  margin-bottom: 20px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+  padding: 0 20px;
+  text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+}
+
+/* 屏幕状态 */
+.screen-status {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 1;
+}
+
+/* 倒计时时间 */
+.screen-timer {
+  text-align: center;
+  z-index: 1;
+}
+
+.timer-value {
+  font-size: 280px;
+  font-weight: bold;
+  font-family: 'Courier New', monospace;
+  color: #fff;
+  letter-spacing: 1px;
+  line-height: 1;
+  text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+}
+
+/* 圆形状态灯 */
+.status-light {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  position: absolute;
+  right: 10%;
+  top: 50%;
+  transform: translateY(-50%);
+  box-shadow: 0 0 40px rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+  z-index: 2;
+}
+
+.light-glow {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 20px 20px, rgba(255, 255, 255, 0.8), transparent);
+  filter: blur(12px);
+}
+
+/* 屏幕状态标签 */
+.screen-status-tag {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 100;
+}
+
+.screen-status-tag.running {
+  background-color: rgba(103, 194, 58, 0.3);
+  color: #67c23a;
+  border: 2px solid rgba(103, 194, 58, 0.5);
+  animation: pulse 2s infinite;
+}
+
+.screen-status-tag.paused {
+  background-color: rgba(230, 162, 60, 0.3);
+  color: #e6a23c;
+  border: 2px solid rgba(230, 162, 60, 0.5);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* 连接状态 */
 .connection-status {
   position: absolute;
   top: 20px;
-  left: 20px;
+  right: 20px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -434,9 +282,9 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   border-radius: 20px;
   font-size: 14px;
   font-weight: 500;
-  z-index: 100;
   background-color: rgba(0, 0, 0, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.2);
+  z-index: 100;
 }
 
 .connection-status.disconnected {
@@ -451,225 +299,16 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   background-color: rgba(250, 173, 20, 0.1);
 }
 
-.connection-status.active {
+.connection-status.connected {
   color: #52c41a;
   border-color: rgba(82, 196, 26, 0.4);
   background-color: rgba(82, 196, 26, 0.1);
 }
 
-.screen-label {
-  margin-left: 8px;
-  padding: 2px 8px;
-  background-color: #13ce66;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-/* 主显示区 */
-.main-display {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  opacity: 0.5;
-  transition: opacity 0.5s ease;
-}
-
-.main-display.active {
-  opacity: 1;
-}
-
-/* 顶部信息栏 */
-.top-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 40px;
-  background-color: rgba(0, 0, 0, 0.8);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.match-type {
-  font-size: 20px;
-  font-weight: 600;
-  color: #fff;
-}
-
-.ab-mode {
-  font-size: 18px;
-  color: #13ce66;
-  font-weight: 500;
-  padding: 6px 16px;
-  background-color: rgba(19, 206, 102, 0.2);
-  border-radius: 20px;
-  border: 1px solid rgba(19, 206, 102, 0.4);
-}
-
-.control-info {
-  font-size: 14px;
-  color: #aaa;
-}
-
-/* 中心显示区 */
-.center-display {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 40px;
-}
-
-.screen-prompt {
-  font-size: 32px;
-  font-weight: bold;
-  text-align: center;
-  margin-bottom: 20px;
-  color: #fff;
-  text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  width: 100%;
-}
-
-.screen-status {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-  position: relative;
-  flex-shrink: 0;
-}
-
-/* 状态灯 */
-.status-light {
-  width: 200px;
-  height: 200px;
-  border-radius: 50%;
-  position: relative;
-  transition: all 0.3s ease;
-  flex-shrink: 0;
-}
-
-.light-glow {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  width: 180px;
-  height: 180px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 30px 30px, rgba(255, 255, 255, 0.8), transparent);
-  filter: blur(8px);
-}
-
-.screen-timer {
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.timer-label {
-  font-size: 20px;
-  color: #aaa;
-  letter-spacing: 2px;
-  margin-bottom: 4px;
-}
-
-.timer-value {
-  font-size: 96px;
-  font-weight: bold;
-  font-family: 'Courier New', monospace;
-  color: #fff;
-  letter-spacing: 4px;
-  text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
-}
-
-/* 屏幕状态标签 */
-.screen-status-tag {
-  position: absolute;
-  top: 140px; /* 原top: 0，改为140px（声音指示器top是90px，高度约30px，140px刚好在其下方） */
-  right: 20px; /* 与声音指示器的right保持一致，确保对齐 */
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  z-index: 100; /* 确保和声音指示器同层级，避免被遮挡 */
-}
-
-.screen-status-tag.running {
-  background-color: rgba(82, 196, 26, 0.3);
-  color: #52c41a;
-  border: 2px solid rgba(82, 196, 26, 0.5);
-  animation: pulse 2s infinite;
-}
-
-.screen-status-tag.paused {
-  background-color: rgba(250, 173, 20, 0.3);
-  color: #faad14;
-  border: 2px solid rgba(250, 173, 20, 0.5);
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-/* 阶段信息 */
-.stage-info {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  gap: 8px;
-  width: 100%;
-  max-width: 600px;
-}
-
-.stage-name {
-  font-size: 28px;
-  font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stage-timer {
-  font-size: 36px;
-  font-family: 'Courier New', monospace;
-  font-weight: bold;
-  color: #fff;
-}
-
-/* 底部状态栏 */
-.bottom-status {
-  display: flex;
-  justify-content: space-around;
-  padding: 20px 40px;
-  background-color: rgba(0, 0, 0, 0.8);
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.status-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 16px;
-  color: #ccc;
-}
-
-.status-item .el-icon {
-  font-size: 20px;
-}
-
 /* 全屏按钮 */
 .fullscreen-btn {
   position: absolute;
-  top: 20px;
+  bottom: 20px;
   right: 20px;
   width: 50px;
   height: 50px;
@@ -695,143 +334,80 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   color: #fff;
 }
 
-/* 声音指示器 */
-.sound-indicator {
-  position: absolute;
-  top: 90px;
-  right: 20px; /* 与屏幕状态标签的right一致 */
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background-color: rgba(0, 0, 0, 0.7);
-  border: 1px solid rgba(82, 196, 26, 0.4);
-  border-radius: 16px;
-  font-size: 14px;
-  color: #52c41a;
-  z-index: 100; /* 保持和屏幕状态标签同层级 */
-}
-
-.sound-indicator.muted {
-  border-color: rgba(255, 77, 79, 0.4);
-  color: #ff4d4f;
-}
-
-.sound-indicator .el-icon {
-  font-size: 18px;
-}
-
-/* AB交替模式说明 */
-.alternate-info {
-  position: absolute;
-  bottom: 100px;
-  left: 50%;
-  transform: translateX(-50%);
-  background-color: rgba(0, 0, 0, 0.9);
-  border: 2px solid rgba(19, 206, 102, 0.6);
-  border-radius: 12px;
-  padding: 20px;
-  max-width: 600px;
-  z-index: 100;
-  animation: fadeIn 0.5s ease;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
-}
-
-.info-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.info-title {
-  font-size: 18px;
-  font-weight: bold;
-  color: #13ce66;
-  text-align: center;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(19, 206, 102, 0.3);
-}
-
-.info-rules {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.rule-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 16px;
-  color: #ddd;
-  line-height: 1.4;
-}
-
-.rule-item .el-icon {
-  flex-shrink: 0;
-  color: #52c41a;
-  font-size: 18px;
-}
-
 /* 响应式调整 */
-@media (max-width: 1024px) {
-  .time-value {
-    font-size: 72px;
-  }
-
-  .status-light {
-    width: 160px;
-    height: 160px;
-  }
-
-  .stage-name {
-    font-size: 24px;
-  }
-
-  .stage-timer {
-    font-size: 28px;
-  }
-}
-
-@media (max-width: 768px) {
-  .time-value {
-    font-size: 64px;
+@media (max-width: 1200px) {
+  .timer-value {
+    font-size: 200px;
   }
 
   .screen-prompt {
-    font-size: 24px;
+    font-size: 28px;
   }
 
   .status-light {
     width: 120px;
     height: 120px;
+    right: 8%;
   }
 
-  .center-display {
-    padding: 20px;
+  .light-glow {
+    width: 60px;
+    height: 60px;
+    background: radial-gradient(circle at 15px 15px, rgba(255, 255, 255, 0.8), transparent);
+  }
+}
+
+@media (max-width: 768px) {
+  .timer-value {
+    font-size: 140px;
   }
 
-  .top-info {
-    flex-direction: column;
-    gap: 10px;
-    padding: 15px 20px;
+  .screen-prompt {
+    font-size: 24px;
+    margin-bottom: 30px;
   }
 
-  .alternate-info {
-    left: 20px;
-    right: 20px;
-    transform: none;
-    max-width: none;
+  .status-light {
+    width: 80px;
+    height: 80px;
+    right: 5%;
+  }
+
+  .light-glow {
+    width: 40px;
+    height: 40px;
+    background: radial-gradient(circle at 10px 10px, rgba(255, 255, 255, 0.8), transparent);
+  }
+
+  .screen-status-tag {
+    top: 10px;
+    left: 10px;
+    font-size: 12px;
+    padding: 4px 12px;
+  }
+
+  .connection-status {
+    top: 10px;
+    right: 10px;
+    font-size: 12px;
+    padding: 6px 12px;
+  }
+
+  .fullscreen-btn {
+    bottom: 10px;
+    right: 10px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .fullscreen-btn .el-icon {
+    font-size: 20px;
   }
 }
 
 @media (max-width: 480px) {
-  .time-value {
-    font-size: 48px;
+  .timer-value {
+    font-size: 100px;
   }
 
   .screen-prompt {
@@ -840,13 +416,15 @@ watch(() => timerState.status, (newStatus, oldStatus) => {
   }
 
   .status-light {
-    width: 100px;
-    height: 100px;
+    width: 60px;
+    height: 60px;
+    right: 3%;
   }
 
-  .stage-details {
-    flex-direction: column;
-    gap: 15px;
+  .light-glow {
+    width: 30px;
+    height: 30px;
+    background: radial-gradient(circle at 8px 8px, rgba(255, 255, 255, 0.8), transparent);
   }
 }
 </style>

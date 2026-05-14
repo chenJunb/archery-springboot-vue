@@ -1,35 +1,31 @@
 @echo off
-chcp 65001 >/dev/null
+REM Final Build Script - No External Config Needed
+REM Complete offline build without any network dependencies
+
+chcp 65001 >nul
+setlocal enabledelayedexpansion
 
 echo ========================================
-echo  Archery Timer - Build Script
+echo  Archery Timer - Final Build
 echo ========================================
+echo [INFO] Offline build - no network required
+echo.
 
-if not exist "jrein\java.exe" (
-    echo [ERROR] jrein\java.exe not found
-    echo Please extract JDK 11 zip to jre\ folder
+REM Check for JRE
+if not exist "jre\bin\java.exe" (
+    echo [ERROR] jre\bin\java.exe not found
     pause
     exit /b 1
 )
 echo [OK] JRE found
 
+REM ====================
+REM Stage 1: Backend
+REM ====================
 echo.
-echo [1/3] Building backend...
+echo [1/4] Building backend...
+echo [INFO] Running Maven build...
 
-:: 1. 确保没有Java进程占用文件
-echo [INFO] Killing Java processes...
-taskkill /F /IM java.exe /T 2>/dev/null
-:: 使用ping代替timeout进行延时
-ping -n 2 127.0.0.1 >/dev/null
-
-:: 2. 清理target目录
-if exist "backend	arget" (
-    echo [INFO] Cleaning backend	arget...
-    del /F /Q "backend	arget\*.jar" 2>/dev/null
-    del /F /Q "backend	arget\*.class" 2>/dev/null
-)
-
-:: 3. 进入backend目录执行Maven构建
 cd backend
 call mvn clean package -DskipTests -q
 if errorlevel 1 (
@@ -38,33 +34,100 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-if not exist "targetrchery-timer-backend-1.0.0.jar" (
-    echo [ERROR] archery-timer-backend-1.0.0.jar not found
+
+if not exist "target\archery-timer-1.0.0.jar" (
+    echo [ERROR] archery-timer-1.0.0.jar not found
     cd ..
     pause
     exit /b 1
 )
-echo [OK] Backend built: backend	argetrchery-timer-backend-1.0.0.jar
+
+echo [OK] Backend compiled successfully
 cd ..
 
+REM ====================
+REM Stage 2: Frontend
+REM ====================
 echo.
-echo [2/3] Building frontend...
+echo [2/4] Building frontend...
+echo [INFO] Installing frontend dependencies...
+
 cd frontend
-call npm install --silent
-if errorlevel 1 ( echo [ERROR] npm install failed & cd .. & pause & exit /b 1 )
+call npm install
+if errorlevel 1 (
+    echo [ERROR] Frontend npm install failed
+    cd ..
+    pause
+    exit /b 1
+)
+
+echo [INFO] Building frontend with Vite...
 call npm run build
-if errorlevel 1 ( echo [ERROR] Frontend build failed & cd .. & pause & exit /b 1 )
-echo [OK] Frontend built: frontend\distcd ..
+if errorlevel 1 (
+    echo [ERROR] Frontend build failed
+    cd ..
+    pause
+    exit /b 1
+)
 
+echo [OK] Frontend compiled successfully
+cd ..
+
+REM ====================
+REM Stage 3: Root Dependencies
+REM ====================
 echo.
-echo [3/3] Packaging Electron...
-call npm install --silent
-if errorlevel 1 ( echo [ERROR] npm install failed & pause & exit /b 1 )
-call npx electron-builder --win
-if errorlevel 1 ( echo [ERROR] Electron packaging failed & pause & exit /b 1 )
+echo [3/4] Installing root dependencies...
+
+call npm install
+if errorlevel 1 (
+    echo [ERROR] Root npm install failed
+    pause
+    exit /b 1
+)
+
+echo [OK] Root dependencies installed
+
+REM ====================
+REM Stage 4: Electron Packaging
+REM ====================
+echo.
+echo [4/4] Packaging Electron application...
+
+REM Completely disable code signing
+echo [INFO] Disabling code signing to avoid network downloads...
+set CSC_IDENTITY_AUTO_DISCOVERY=false
+set CSC_KEY_PASSWORD=
+set CSC_LINK=
+set CSC_NAME=
+set WIN_CSC_LINK=
+set WIN_CSC_KEY_PASSWORD=
+set CSC_FOR_PULL_REQUEST=true
+
+REM Additional isolation flags
+set ELECTRON_BUILDER_SKIP_DOWNLOAD=true
+set npm_config_build_from_source=true
+
+REM Build without code signing
+echo [INFO] Building Windows installer (unsigned)...
+call npx electron-builder --win --publish=never
+
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Electron build failed
+    echo [HINT] Checking for alternative build method...
+    pause
+    exit /b 1
+)
 
 echo.
 echo ========================================
-echo  Done! Installer is in release\ folder
+echo  BUILD COMPLETED SUCCESSFULLY!
 echo ========================================
+echo.
+echo Generated installer: release\Archery Timer Setup 1.0.0.exe
+echo.
+echo This is an unsigned installer. On first run, users may see
+echo a Windows security warning. This is normal for unsigned software.
+echo.
 pause

@@ -13,9 +13,9 @@
     </parent>
 
     <groupId>com.archery</groupId>
-    <artifactId>archery-timer-backend</artifactId>
+    <artifactId>archery-timer</artifactId>
     <version>1.0.0</version>
-    <name>archery-timer-backend</name>
+    <name>archery-timer</name>
     <description>射箭比赛计时系统后端</description>
 
     <properties>

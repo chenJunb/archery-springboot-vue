@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src')
+      '@': path.resolve(__dirname, './src'),
+      // 解决element-plus模块路径问题
+      '../../utils/vue/window-node.mjs': path.resolve(__dirname, './node_modules/element-plus/es/utils/vue/global-node.mjs')
     }
   },
   server: {
