@@ -1,0 +1,46 @@
+; 自定义NSIS安装脚本 - 确保桌面快捷方式被创建
+
+!macro customInstall
+  ; 确保桌面快捷方式被创建
+  DetailPrint "Creating desktop shortcut for 射箭比赛计时系统..."
+
+  ; 创建桌面快捷方式
+  CreateShortCut "$DESKTOP\射箭比赛计时系统.lnk" "$INSTDIR\射箭比赛计时系统.exe" "" \
+    "$INSTDIR\射箭比赛计时系统.exe" 0 SW_SHOWNORMAL ALT|CONTROL|SHIFT|F1 "射箭比赛计时系统"
+
+  ; 创建开始菜单快捷方式
+  CreateDirectory "$SMPROGRAMS\射箭比赛计时系统"
+  CreateShortCut "$SMPROGRAMS\射箭比赛计时系统\射箭比赛计时系统.lnk" "$INSTDIR\射箭比赛计时系统.exe" "" \
+    "$INSTDIR\射箭比赛计时系统.exe" 0 SW_SHOWNORMAL ALT|CONTROL|SHIFT|F1 "射箭比赛计时系统"
+
+  ; 添加快捷方式到启动文件夹（可选）
+  ; CreateShortCut "$SMSTARTUP\射箭比赛计时系统.lnk" "$INSTDIR\射箭比赛计时系统.exe"
+
+  DetailPrint "Shortcuts created successfully."
+!macroend
+
+; 安装完成后的操作
+Function .onInstSuccess
+  ; 显示安装成功消息
+  MessageBox MB_OK|MB_ICONINFORMATION \
+    "射箭比赛计时系统安装成功！$\r$\n$\r$\n桌面快捷方式已创建。$\r$\n$\r$\n控制台页面: http://localhost:3000"
+FunctionEnd
+
+; 安装失败时的操作
+Function .onInstFailed
+  MessageBox MB_OK|MB_ICONEXCLAMATION "安装失败，请检查系统权限并重试。"
+FunctionEnd
+
+; 卸载时的操作
+!macro customUnInstall
+  ; 删除桌面快捷方式
+  Delete "$DESKTOP\射箭比赛计时系统.lnk"
+
+  ; 删除开始菜单文件夹和快捷方式
+  RMDir /r "$SMPROGRAMS\射箭比赛计时系统"
+
+  ; 删除启动文件夹快捷方式（如果存在）
+  ; Delete "$SMSTARTUP\射箭比赛计时系统.lnk"
+
+  DetailPrint "Shortcuts removed successfully."
+!macroend
