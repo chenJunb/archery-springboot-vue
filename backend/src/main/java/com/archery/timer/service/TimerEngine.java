@@ -18,6 +18,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
 import org.springframework.util.CollectionUtils;
 import com.google.common.collect.Lists;
 
@@ -243,14 +245,16 @@ public class TimerEngine {
 
         //是否开启轮次记录
         if(enhancedMatchType.getIsRound() && !CollectionUtils.isEmpty(enhancedMatchType.getLaunchRoundKeys())){
-            log.debug("开启轮次记录，初始化轮次信息");
+            log.debug("开启轮次记录，初始化轮次信息,每轮每位选手最大比赛次数{}",enhancedMatchType.getRoundSession());
             this.currentState.setIsRound(true);
-            RoundRecordDto roundRecordDto = new RoundRecordDto().init(enhancedMatchType.getLaunchRoundKeys());
+            this.currentState.setRoundSession(enhancedMatchType.getRoundSession());
+            RoundRecordDto roundRecordDto = new RoundRecordDto().init(enhancedMatchType.getLaunchRoundKeys(),enhancedMatchType.getRoundSession());
             this.currentState.setRoundRecord(roundRecordDto);
         } else {
             //未开始轮次，参数置为null
             this.currentState.setIsRound(false);
             this.currentState.setRoundRecord(null);
+            this.currentState.setRoundSession(null);
         }
 
         notifyStateChange();
@@ -2243,6 +2247,7 @@ public class TimerEngine {
      */
     private void recordRoundUpdate(String operation){
         log.debug("[比赛轮次记录更新]");
+        //TODO 比赛轮次完成后比赛人员需要调换位置 AB、CD、CD、AB、AB、CD
         if(!currentState.getIsRound()){
             //未开启比赛轮次，跳过
             log.debug("[比赛轮次记录更新] 未开启比赛轮次，跳过");
@@ -2272,38 +2277,153 @@ public class TimerEngine {
                         .forEach(config -> {
                             config.setStatus("ended");
                         });
-                //判断当前轮次key是否都结束了
-                List<String> launchRoundKeys = roundRecordDto.getLaunchRoundKeys();
-                String lastlaunchRoundKey = launchRoundKeys.get(launchRoundKeys.size()-1);
+                //基于现有排序规则进行排序
+                List<String> sortedValues = getLaunchRoundKeys(roundRecordDto.getSortMethod(),roundRecordDto.getLaunchRoundKeys());
 
-                if(lastlaunchRoundKey.equals(roundRecordDto.getLaunchRoundCurrentKey())){
-                    //当前轮次key是轮次key集合的最后一条 将开启新轮次
-                    roundRecordDto.setRound(roundRecordDto.getRound()+1);
-                    roundRecordDto.setLaunchRoundCurrentKey(launchRoundKeys.get(0));
-                    //在新增一条未开始状态记录
-                    RoundDetailDTO newDetail  = new RoundDetailDTO();
-                    newDetail.setNo(lastDetail.getNo()+1);
-                    newDetail.setNoByRound(0);
-                    newDetail.setStatus("not_started");
-                    newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
+                String lastlaunchRoundKey = sortedValues.get(sortedValues.size()-1);
+                int session = 1;
+                // 判断逻辑1 当前比赛类型中比赛人员比赛次数是否大于1
+                if (roundRecordDto.getRoundSession() == 1) {
+                    //比赛次数等于1 默认不使用次数，仅使用轮次
 
-                    roundRecordDto.getDetails().add(newDetail);
+                    //判断逻辑 判断当前轮次key是否都结束了
+                    if(lastlaunchRoundKey.equals(roundRecordDto.getLaunchRoundCurrentKey())){
+                        //当前轮次key是轮次key集合的最后一条 将开启新轮次
+                        roundRecordDto.setRound(roundRecordDto.getRound()+1);
+                        roundRecordDto.setSession(session);
+                        //因开启新一轮 排序规则需倒转
+                        roundRecordDto.setSortMethod(reversedSortMethod(roundRecordDto.getSortMethod()));
+                        //获取新排序规则下的轮次内容
+                        sortedValues = getLaunchRoundKeys(roundRecordDto.getSortMethod(),roundRecordDto.getLaunchRoundKeys());
+                        roundRecordDto.setLaunchRoundCurrentKey(sortedValues.get(0));
+
+                        //在新增一条未开始状态记录
+                        RoundDetailDTO newDetail  = new RoundDetailDTO();
+                        newDetail.setNo(lastDetail.getNo()+1);
+                        newDetail.setNoByRound(0);
+                        newDetail.setStatus("not_started");
+                        newDetail.setSession(session);
+                        newDetail.setRound(roundRecordDto.getRound());
+                        newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
+                        newDetail.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundCurrentKey());
+                        roundRecordDto.getDetails().add(newDetail);
+                    } else {
+                        //当前轮次key不是轮次key集合的最后一条 继续当前轮次
+                        roundRecordDto.setLaunchRoundCurrentKey(sortedValues.get(lastDetail.getNoByRound()+1));
+                        roundRecordDto.setSession(session);
+                        //在新增一条未开始状态记录
+                        RoundDetailDTO newDetail  = new RoundDetailDTO();
+                        newDetail.setNo(lastDetail.getNo()+1);
+                        newDetail.setNoByRound(lastDetail.getNoByRound()+1);
+                        newDetail.setStatus("not_started");
+                        newDetail.setSession(session);
+                        newDetail.setRound(roundRecordDto.getRound());
+                        newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
+                        newDetail.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundCurrentKey());
+                        roundRecordDto.getDetails().add(newDetail);
+                    }
+                } else if (roundRecordDto.getSession().equals(roundRecordDto.getRoundSession())){
+                    // 判断逻辑2 比赛次数大于1，且当前轮次中比赛人员次数=配置最大次数 再判断当前轮次是否已经完成
+
+                    //判断逻辑 判断当前轮次key是否都结束了
+                    if(lastlaunchRoundKey.equals(roundRecordDto.getLaunchRoundCurrentKey())){
+                        //当前轮次key是轮次key集合的最后一条 将开启新轮次
+                        roundRecordDto.setRound(roundRecordDto.getRound()+1);
+                        roundRecordDto.setSession(session);
+
+                        //因开启新一轮 排序规则需倒转
+                        roundRecordDto.setSortMethod(reversedSortMethod(roundRecordDto.getSortMethod()));
+                        //获取新排序规则下的轮次内容
+                        sortedValues = getLaunchRoundKeys(roundRecordDto.getSortMethod(),roundRecordDto.getLaunchRoundKeys());
+                        roundRecordDto.setLaunchRoundCurrentKey(sortedValues.get(0));
+
+                        //在新增一条未开始状态记录
+                        RoundDetailDTO newDetail  = new RoundDetailDTO();
+                        newDetail.setNo(lastDetail.getNo()+1);
+                        newDetail.setNoByRound(0);
+                        newDetail.setStatus("not_started");
+                        newDetail.setSession(session);
+                        newDetail.setRound(roundRecordDto.getRound());
+                        newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+session+"次"+roundRecordDto.getLaunchRoundCurrentKey());
+                        newDetail.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundCurrentKey());
+                        roundRecordDto.getDetails().add(newDetail);
+                    } else {
+                        int index = sortedValues.indexOf(roundRecordDto.getLaunchRoundCurrentKey());
+                        //当前轮次key不是轮次key集合的最后一条 继续当前轮次
+                        roundRecordDto.setLaunchRoundCurrentKey(sortedValues.get(index+1));
+                        roundRecordDto.setSession(session);
+                        //在新增一条未开始状态记录
+                        RoundDetailDTO newDetail  = new RoundDetailDTO();
+                        newDetail.setNo(lastDetail.getNo()+1);
+                        newDetail.setNoByRound(lastDetail.getNoByRound()+1);
+                        newDetail.setStatus("not_started");
+                        newDetail.setSession(session);
+                        newDetail.setRound(roundRecordDto.getRound());
+                        newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+session+"次"+roundRecordDto.getLaunchRoundCurrentKey());
+                        newDetail.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundCurrentKey());
+
+                        roundRecordDto.getDetails().add(newDetail);
+                    }
+
                 } else {
-                    //当前轮次key不是轮次key集合的最后一条 继续当前轮次
-                    roundRecordDto.setLaunchRoundCurrentKey(launchRoundKeys.get(lastDetail.getNoByRound()+1));
+                    // 判断逻辑3 比赛次数大于1，且当前轮次中比赛人员次数<配置最大次数 继续当前轮次当前选手
+                    session++;
+                    roundRecordDto.setSession(session);
                     //在新增一条未开始状态记录
                     RoundDetailDTO newDetail  = new RoundDetailDTO();
                     newDetail.setNo(lastDetail.getNo()+1);
                     newDetail.setNoByRound(lastDetail.getNoByRound()+1);
                     newDetail.setStatus("not_started");
-                    newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+roundRecordDto.getLaunchRoundCurrentKey());
-
+                    newDetail.setSession(session);
+                    newDetail.setRound(roundRecordDto.getRound());
+                    newDetail.setRoundDescription("第"+roundRecordDto.getRound()+"轮"+session+"次"+roundRecordDto.getLaunchRoundCurrentKey());
+                    newDetail.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundCurrentKey());
                     roundRecordDto.getDetails().add(newDetail);
                 }
+
             }
         }
         currentState.setRoundRecord(roundRecordDto);
 
+    }
+
+    /**
+     * 开启新轮次需调转排序规则
+     * @return
+     */
+    public String reversedSortMethod(String sortMethod){
+        if ("ASC".equals(sortMethod)){
+            return "DESC";
+        } else if ("DESC".equals(sortMethod)){
+            return "ASC";
+        }
+        return null;
+    }
+
+
+    /**
+     * 获取轮次人员信息
+     * @param sortMethod
+     * @param launchRoundKeys
+     * @return
+     */
+    public List<String> getLaunchRoundKeys(String sortMethod,Map<Integer, String> launchRoundKeys){
+        List<String> sortedValues = Lists.newArrayList();
+
+        if("ASC".equals(sortMethod)){
+            //升序
+            sortedValues = launchRoundKeys.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey()) // 按 Key 升序排序
+                    .map(Map.Entry::getValue)           // 提取 String 值
+                    .collect(Collectors.toList());      // 收集到 List
+        } else {
+            //倒叙
+            sortedValues = launchRoundKeys.entrySet().stream()
+                    .sorted(Map.Entry.<Integer, String>comparingByKey().reversed()) // 先正序比较，再反转
+                    .map(Map.Entry::getValue)
+                    .collect(Collectors.toList());
+        }
+        return sortedValues;
     }
 
 
@@ -2322,12 +2442,15 @@ public class TimerEngine {
                 if( lastDetail.getNo()-1 == e.getNo()){
                     e.setStatus("not_started");
                     newDetails.add(e);
-                    roundRecordDto.setLaunchRoundCurrentKey(roundRecordDto.getLaunchRoundKeys().get(e.getNoByRound()));
+                    roundRecordDto.setLaunchRoundCurrentKey(e.getLaunchRoundCurrentKey());
+                    roundRecordDto.setSession(e.getSession());
+                    //退回到上一条的轮次
+                    roundRecordDto.setRound(e.getRound());
                 } else if(lastDetail.getNo() == e.getNo()){
                     //最后一条体跳过
                     if(lastDetail.getNoByRound() == 0){
-                        //如果当前记录轮次中序号是0 则是新开启轮次，需要将轮次记录中的轮次-1
-                        roundRecordDto.setRound(roundRecordDto.getRound()-1);
+                        //因退回到上一轮次，排序规则需倒转
+                        roundRecordDto.setSortMethod(reversedSortMethod(roundRecordDto.getSortMethod()));
                     }
                 } else {
                     newDetails.add(e);

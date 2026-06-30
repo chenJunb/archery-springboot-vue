@@ -22,10 +22,40 @@
     "totalTime": 190,
     "customizable": true,
     "isRound": true,
-    "launchRoundKeys":[
-      "选手AB",
-      "选手CD"
-    ]
+    "launchRoundKeys": {
+      "0": "选手AB",
+      "1": "选手CD"
+    },
+    "roundSession": 1
+  },
+  "personal_ranking_2026": {
+    "id": "personal_ranking_2026",
+    "name": "个人排名赛(2026版)",
+    "chineseName": "个人排名赛(2026版)",
+    "category": "individual",
+    "subCategory": "ranking",
+    "defaultScreenMode": "sync",
+    "preparationTime": 10,
+    "competitionTime": 90,
+    "yellowLightTime": 30,
+    "preparationSound": "prepare",
+    "competitionSound": "shooting",
+    "yellowLightSound": null,
+    "supportABAlternate": true,
+    "alternateType": "individual_alternate",
+    "resetOnSwitchIndividual": true,
+    "pauseOnSwitchTeam": false,
+    "defaultAPrompt": "选手AB准备",
+    "defaultBPrompt": "选手AB准备",
+    "description": "个人排名赛 - 10秒准备 + 90秒射击 + 30秒黄灯",
+    "totalTime": 190,
+    "customizable": true,
+    "isRound": true,
+    "launchRoundKeys": {
+      "0": "选手AB",
+      "1": "选手CD"
+    },
+    "roundSession": 2
   },
   "personal_ranking_duel": {
     "id": "personal_ranking_duel",
@@ -50,7 +80,8 @@
     "totalTime": 40,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "personal_elimination_unified": {
     "id": "personal_elimination_unified",
@@ -75,7 +106,8 @@
     "totalTime": 100,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "personal_elimination_alternate": {
     "id": "personal_elimination_alternate",
@@ -100,7 +132,8 @@
     "totalTime": 30,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "team_elimination_unified": {
     "id": "team_elimination_unified",
@@ -125,7 +158,8 @@
     "totalTime": 130,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "team_elimination_final_alternate": {
     "id": "team_elimination_final_alternate",
@@ -150,7 +184,8 @@
     "totalTime": 130,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "team_elimination_duel_alternate": {
     "id": "team_elimination_duel_alternate",
@@ -175,7 +210,8 @@
     "totalTime": 70,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "mixed_team_elimination_unified": {
     "id": "mixed_team_elimination_unified",
@@ -200,7 +236,8 @@
     "totalTime": 120,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   },
   "mixed_team_elimination_final_alternate": {
     "id": "mixed_team_elimination_final_alternate",
@@ -225,6 +262,7 @@
     "totalTime": 120,
     "customizable": false,
     "isRound": false,
-    "launchRoundKeys":null
+    "launchRoundKeys":null,
+    "roundSession": null
   }
 }

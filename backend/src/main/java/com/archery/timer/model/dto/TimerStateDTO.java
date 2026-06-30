@@ -79,6 +79,8 @@ public class TimerStateDTO {
 
 
     private Boolean isRound; //是否开启比赛轮次
+
+    private Integer roundSession; // 每轮比赛比赛次数
     /**
      * 比赛轮次
      */

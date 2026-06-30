@@ -48,7 +48,9 @@ public class EnhancedMatchTypeDTO {
     private Map<String, Object> rules; // 比赛规则描述
 
     private Boolean isRound; //是否开启比赛轮次
-    private List<String> launchRoundKeys; //比赛轮次集合
+    private Map<Integer, String> launchRoundKeys; //比赛轮次集合
+
+    private Integer roundSession; // 每轮比赛比赛次数
 
     @Data
     public static class StageDTO {
